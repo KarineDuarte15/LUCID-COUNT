@@ -18,7 +18,7 @@ router = APIRouter(
 
 # --- Constantes de Validação ---
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 Megabytes
-ALLOWED_MIME_TYPES = ["application/pdf", "application/xml", "text/xml"]
+ALLOWED_MIME_TYPES = ["application/pdf", "application/xml", "text/xml", "text/plain"  ]
 UPLOAD_DIRECTORY = Path("data/uploads")
 
 
@@ -26,10 +26,10 @@ UPLOAD_DIRECTORY = Path("data/uploads")
     "/file/",
     response_model=UploadResponse,
     summary="Recebe um único ficheiro (PDF ou XML)",
-    description=f"Faz o upload de um ficheiro para o servidor, validando o tipo (PDF, XML) e o tamanho (máx {MAX_FILE_SIZE / 1024 / 1024}MB)."
+    description=f"Faz o upload de um ficheiro para o servidor, validando o tipo (PDF, XML ou TXT) e o tamanho (máx {MAX_FILE_SIZE / 1024 / 1024}MB)."
 )
 async def upload_validated_file(
-    file: Annotated[UploadFile, File(description="O ficheiro a ser enviado (PDF ou XML).")]
+    file: Annotated[UploadFile, File(description="O ficheiro a ser enviado (PDF ou XML,TXTS).")]
 ):
     UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
 
