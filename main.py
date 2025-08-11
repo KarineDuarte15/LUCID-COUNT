@@ -2,8 +2,8 @@
 
 from fastapi import FastAPI
 # Importa o módulo de upload a partir do pacote 'app'
-# A importação agora funciona perfeitamente porque 'app' é um pacote
-# claramente visível a partir da raiz do projeto.
+
+
 from app.routers import upload
 
 # Cria a instância principal da aplicação FastAPI

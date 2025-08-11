@@ -1,34 +1,27 @@
 # docker-compose.yml
 
+version: '3.8'
 
 services:
-  # Define o serviço do nosso banco de dados
   postgres_db:
-    # Usa a imagem oficial do PostgreSQL, versão 15
     image: postgres:15-alpine
     
-    # Variáveis de ambiente para configurar o banco de dados
-    # ATENÇÃO: Em um projeto real, use um ficheiro .env para estes segredos
     environment:
       - POSTGRES_USER=luciduser
-      - POSTGRES_PASSWORD=lucidpassword
+      - POSTGRES_PASSWORD=postgres # Usando a senha simples que definimos
       - POSTGRES_DB=lucidcount_db
+      # --- ALTERAÇÃO FINAL ---
+      # Força o PostgreSQL a usar autenticação por senha md5, que é mais compatível
+      - POSTGRES_HOST_AUTH_METHOD=md5
       
-    # Mapeia uma pasta no seu computador para uma pasta dentro do container
-    # Isto garante que os dados do seu banco de dados persistam mesmo que o container seja removido
     volumes:
       - postgres_data:/var/lib/postgresql/data
       
-    # Expõe a porta do PostgreSQL do container para o seu computador
-    # Permite que a sua API (rodando no seu PC) se conecte ao banco (rodando no Docker)
     ports:
       - "5432:5432"
       
-    # Define uma política de reinício
-    # Se o container parar por algum motivo, ele tentará reiniciar automaticamente
     restart: always
 
-# Define o volume nomeado que será usado para persistir os dados
 volumes:
   postgres_data:
     driver: local

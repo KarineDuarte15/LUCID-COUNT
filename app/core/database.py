@@ -1,19 +1,14 @@
 # app/core/database.py
 
-import os
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
 
-# Carrega as variáveis de ambiente do ficheiro .env
-load_dotenv()
+# Importa o nosso objeto de configurações centralizadas
+from .config import settings
 
-# Pega a URL do banco de dados a partir das variáveis de ambiente
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
-
-# Cria o "motor" do SQLAlchemy. Este é o ponto de entrada principal para o banco de dados.
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+# Usa a URL do banco de dados a partir do objeto de configurações
+engine = create_engine(settings.DATABASE_URL)
 
 # Cria uma classe SessionLocal. Cada instância desta classe será uma sessão de banco de dados.
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

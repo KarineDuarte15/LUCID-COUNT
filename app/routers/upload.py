@@ -1,68 +1,81 @@
-
-# app/routers/upload.py
-
-import shutil
-import uuid
-from pathlib import Path
 from fastapi import APIRouter, File, UploadFile, HTTPException, status
-from typing import Annotated
+from typing import Annotated, List
+from pathlib import Path
+import uuid
+import shutil
 
-# Importa o schema de resposta usando um import absoluto a partir da raiz do pacote 'app'
 from app.schemas.upload import UploadResponse
 
-# Cria um novo "roteador". Podemos pensar nisso como uma mini-aplicação FastAPI.
 router = APIRouter(
     prefix="/upload",
     tags=["Uploads"],
 )
 
-# --- Constantes de Validação ---
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 Megabytes
-ALLOWED_MIME_TYPES = ["application/pdf", "application/xml", "text/xml", "text/plain"  ]
-UPLOAD_DIRECTORY = Path("data/uploads")
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+ALLOWED_MIME_TYPES = [
+    "application/pdf",
+    "application/xml",
+    "text/xml",
+    "text/plain"
+]
+BASE_UPLOAD_DIRECTORY = Path("data/uploads")
 
+# Mapeamento de tipos de documentos → pastas
+DOCUMENT_FOLDERS = {
+    "encerramento_iss": "Encerramento_ISS",
+    "efd_icms": "EFD_ICMS",
+    "efd_contribuicoes": "EFD_Contribuicoes",
+    "mit": "MIT",
+    "pgdas": "PGDAS",
+    "relatorio_saidas": "Relatorio_Saidas",
+    "relatorio_entradas": "Relatorio_Entradas"
+}
 
 @router.post(
-    "/file/",
-    response_model=UploadResponse,
-    summary="Recebe um único ficheiro (PDF ou XML)",
-    description=f"Faz o upload de um ficheiro para o servidor, validando o tipo (PDF, XML ou TXT) e o tamanho (máx {MAX_FILE_SIZE / 1024 / 1024}MB)."
+    "/files/",
+    response_model=list[UploadResponse],
+    summary="Recebe múltiplos ficheiros",
+    description="Upload de múltiplos ficheiros (PDF, XML, TXT) organizados por tipo de documento."
 )
-async def upload_validated_file(
-    file: Annotated[UploadFile, File(description="O ficheiro a ser enviado (PDF ou XML,TXTS).")]
+async def upload_multiple_files(
+    files: Annotated[List[UploadFile], File(description="Lista de ficheiros a enviar")],
+    doc_type: str = "encerramento_iss"  # tipo de documento
 ):
-    UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
-
-    if file.content_type not in ALLOWED_MIME_TYPES:
+    if doc_type not in DOCUMENT_FOLDERS:
         raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Tipo de ficheiro não suportado. Use um dos seguintes: {', '.join(ALLOWED_MIME_TYPES)}"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Tipo de documento inválido. Tipos permitidos: {', '.join(DOCUMENT_FOLDERS.keys())}"
         )
 
-    size = await file.read()
-    if len(size) > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Ficheiro muito grande. O tamanho máximo permitido é de {MAX_FILE_SIZE / 1024 / 1024:.1f}MB."
-        )
-    await file.seek(0)
+    saved_files = []
+    target_dir = BASE_UPLOAD_DIRECTORY / DOCUMENT_FOLDERS[doc_type]
+    target_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        file_extension = Path(file.filename).suffix
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
-        file_path = UPLOAD_DIRECTORY / unique_filename
+    for file in files:
+        if file.content_type not in ALLOWED_MIME_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=f"Tipo não suportado ({file.filename})."
+            )
+
+        size = await file.read()
+        if len(size) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Arquivo muito grande: {file.filename}"
+            )
+        await file.seek(0)
+
+        unique_name = f"{uuid.uuid4()}{Path(file.filename).suffix}"
+        file_path = target_dir / unique_name
 
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Não foi possível salvar o ficheiro. Erro: {e}"
-        )
+        saved_files.append(UploadResponse(
+            filename=unique_name,
+            content_type=file.content_type,
+            size_in_bytes=len(size)
+        ))
 
-    return UploadResponse(
-        filename=unique_filename,
-        content_type=file.content_type,
-        size_in_bytes=len(size)
-    )
+    return saved_files
