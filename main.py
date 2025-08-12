@@ -1,10 +1,9 @@
 # main.py (localizado na pasta raiz LUCID-COUNT)
 
 from fastapi import FastAPI
-# Importa o módulo de upload a partir do pacote 'app'
 
-
-from app.routers import upload
+# Importa os nossos routers
+from app.routers import upload, documentos
 
 # Cria a instância principal da aplicação FastAPI
 app = FastAPI(
@@ -13,8 +12,9 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Inclui as rotas definidas no módulo de upload
+# Inclui as rotas de cada módulo na aplicação principal
 app.include_router(upload.router)
+app.include_router(documentos.router) # NOVO: Regista o router de documentos
 
 
 @app.get("/", tags=["Root"])
@@ -24,4 +24,3 @@ def read_root():
     Retorna uma mensagem de boas-vindas.
     """
     return {"message": "Bem-vindo à API LUCID-COUNT!"}
-
