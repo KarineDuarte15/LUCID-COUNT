@@ -1,81 +1,114 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, status
-from typing import Annotated, List
-from pathlib import Path
-import uuid
+# app/routers/upload.py
+
 import shutil
+import uuid
+import os # Importado para manipulação de ficheiros
+from pathlib import Path
+from typing import Annotated, List
 
-from app.schemas.upload import UploadResponse
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from sqlalchemy.orm import Session
 
+# Importações da nossa aplicação
+from app.core.database import SessionLocal
+from app.crud import documento as crud_documento
+from app.schemas import documento as schemas_documento
+
+# Cria o roteador
 router = APIRouter(
     prefix="/upload",
     tags=["Uploads"],
 )
 
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
-ALLOWED_MIME_TYPES = [
-    "application/pdf",
-    "application/xml",
-    "text/xml",
-    "text/plain"
-]
-BASE_UPLOAD_DIRECTORY = Path("data/uploads")
+# --- Constantes de Validação ---
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 Megabytes
+ALLOWED_MIME_TYPES = ["application/pdf", "application/xml", "text/xml", "text/plain"]
+UPLOAD_DIRECTORY = Path("data/uploads")
 
-# Mapeamento de tipos de documentos → pastas
-DOCUMENT_FOLDERS = {
-    "encerramento_iss": "Encerramento_ISS",
-    "efd_icms": "EFD_ICMS",
-    "efd_contribuicoes": "EFD_Contribuicoes",
-    "mit": "MIT",
-    "pgdas": "PGDAS",
-    "relatorio_saidas": "Relatorio_Saidas",
-    "relatorio_entradas": "Relatorio_Entradas"
-}
+
+# --- Dependência da Base de Dados ---
+def get_db():
+    """
+    Função de dependência para obter uma sessão da base de dados.
+    Garante que a sessão é sempre fechada após a requisição.
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 @router.post(
     "/files/",
-    response_model=list[UploadResponse],
-    summary="Recebe múltiplos ficheiros",
-    description="Upload de múltiplos ficheiros (PDF, XML, TXT) organizados por tipo de documento."
+    response_model=List[schemas_documento.Documento],
+    summary="Recebe, valida e regista múltiplos ficheiros",
+    description=f"Faz o upload de um ou mais ficheiros (PDF/XML/TXT, máx {MAX_FILE_SIZE/1024/1024}MB cada), guarda-os e regista os seus metadados na base de dados."
 )
-async def upload_multiple_files(
-    files: Annotated[List[UploadFile], File(description="Lista de ficheiros a enviar")],
-    doc_type: str = "encerramento_iss"  # tipo de documento
+async def upload_e_registar_multiplos_ficheiros(
+    files: Annotated[List[UploadFile], File(description="Uma lista de ficheiros a serem enviados (PDF, XML ou TXT).")],
+    db: Session = Depends(get_db)
 ):
-    if doc_type not in DOCUMENT_FOLDERS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Tipo de documento inválido. Tipos permitidos: {', '.join(DOCUMENT_FOLDERS.keys())}"
-        )
-
-    saved_files = []
-    target_dir = BASE_UPLOAD_DIRECTORY / DOCUMENT_FOLDERS[doc_type]
-    target_dir.mkdir(parents=True, exist_ok=True)
+    """
+    Endpoint para receber, validar, salvar múltiplos ficheiros e registar na base de dados.
+    """
+    UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    
+    documentos_criados = []
 
     for file in files:
+        # Validação de tipo de ficheiro (MIME Type)
         if file.content_type not in ALLOWED_MIME_TYPES:
             raise HTTPException(
                 status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail=f"Tipo não suportado ({file.filename})."
+                detail=f"O ficheiro '{file.filename}' tem um tipo não suportado. Use um dos seguintes: {', '.join(ALLOWED_MIME_TYPES)}"
             )
 
-        size = await file.read()
-        if len(size) > MAX_FILE_SIZE:
+        # Gerar nome único e caminho do ficheiro
+        file_extension = Path(file.filename).suffix
+        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        file_path = UPLOAD_DIRECTORY / unique_filename
+        
+        try:
+            # Lógica de salvar ficheiro primeiro
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+        except Exception as e:
+            # Captura outros erros que possam ocorrer ao salvar o ficheiro
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Não foi possível salvar o ficheiro '{file.filename}' no disco. Erro: {type(e).__name__} - {e}"
+            )
+
+        # Validação de tamanho APÓS salvar o ficheiro
+        file_size = os.path.getsize(file_path)
+        if file_size > MAX_FILE_SIZE:
+            os.remove(file_path) # Apaga o ficheiro se for muito grande
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"Arquivo muito grande: {file.filename}"
+                detail=f"O ficheiro '{file.filename}' é muito grande ({file_size / 1024 / 1024:.2f}MB). O tamanho máximo permitido é de {MAX_FILE_SIZE / 1024 / 1024:.1f}MB."
             )
-        await file.seek(0)
 
-        unique_name = f"{uuid.uuid4()}{Path(file.filename).suffix}"
-        file_path = target_dir / unique_name
+        # Interação com a Base de Dados para cada ficheiro
+        try:
+            # ATUALIZADO: Lógica para criar o caminho relativo de forma mais segura
+            # Constrói o caminho relativo a partir das nossas constantes
+            caminho_relativo_str = str(UPLOAD_DIRECTORY / unique_filename).replace('\\', '/')
 
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        saved_files.append(UploadResponse(
-            filename=unique_name,
-            content_type=file.content_type,
-            size_in_bytes=len(size)
-        ))
-
-    return saved_files
+            documento_a_criar = schemas_documento.DocumentoCreate(
+                nome_arquivo=unique_filename,
+                tipo_arquivo=file.content_type,
+                caminho_arquivo=caminho_relativo_str
+            )
+            
+            documento_criado = crud_documento.criar_novo_documento(db=db, documento=documento_a_criar)
+            documentos_criados.append(documento_criado)
+            
+        except Exception as e:
+            # Se algo der errado com a base de dados, apaga o ficheiro que foi salvo
+            os.remove(file_path)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Não foi possível registar o ficheiro '{file.filename}' na base de dados. Erro: {type(e).__name__} - {e}"
+            )
+            
+    return documentos_criados
