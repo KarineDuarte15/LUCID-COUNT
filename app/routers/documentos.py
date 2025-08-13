@@ -1,16 +1,16 @@
 # app/routers/documentos.py
 
-from typing import List
+from typing import List, Dict, Any # Importa Dict e Any para o modelo de resposta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response # NOVO: Importa Response
 from sqlalchemy.orm import Session
+import pandas as pd # Importa pandas para manipulação de DataFrames
 
 # Importações da nossa aplicação
 from app.core.database import SessionLocal
 from app.crud import documento as crud_documento
 from app.schemas import documento as schemas_documento
-from app.schemas import dados_fiscais as schemas_dados_fiscais
 from app.services import processamento as services_processamento
 
 # Cria um novo roteador para os endpoints de documentos
@@ -45,16 +45,16 @@ def listar_documentos(
 
 @router.post(
     "/{documento_id}/processar",
-    response_model=schemas_dados_fiscais.NFeProcessadaResponse, # ATUALIZADO
-    summary="Processa um documento XML de NFe e extrai dados fiscais"
+    response_model=List[Dict[str, Any]], # ATUALIZADO: A resposta agora é uma lista de dicionários (JSON de tabela)
+    summary="Processa um XML de NFe e retorna os dados em formato de tabela"
 )
-def processar_documento_por_id(
+def processar_documento_e_estruturar(
     documento_id: int,
     db: Session = Depends(get_db)
 ):
     """
-    Encontra um documento pelo seu ID, processa o ficheiro XML de NFe associado
-    e retorna os dados fiscais extraídos.
+    Encontra um documento, processa o ficheiro XML de NFe associado,
+    estrutura os dados num DataFrame e retorna-o como JSON.
     """
     db_documento = crud_documento.obter_documento_por_id(db, documento_id=documento_id)
     if db_documento is None:
@@ -69,15 +69,15 @@ def processar_documento_por_id(
     caminho_arquivo = Path(db_documento.caminho_arquivo)
 
     try:
-        # ATUALIZADO: Chama a nova função específica para NFe
+        # Passo 1: Extrai os dados brutos do XML
         dados_extraidos_nfe = services_processamento.processar_nfe_xml(caminho_arquivo)
         
-        # Monta a resposta final de acordo com o schema
-        resposta = {
-            "documento_id": documento_id,
-            "dados_nfe": dados_extraidos_nfe
-        }
-        return resposta
+        # Passo 2: Converte os dados brutos para um DataFrame estruturado
+        df_documento = services_processamento.xml_para_dataframe(dados_extraidos_nfe)
+        
+        # Passo 3: Converte o DataFrame para um formato JSON (lista de dicionários)
+        # O 'orient="records"' cria exatamente o formato que a API precisa.
+        return df_documento.to_dict(orient="records")
         
     except FileNotFoundError:
         raise HTTPException(
@@ -87,5 +87,5 @@ def processar_documento_por_id(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Erro ao processar o ficheiro XML: {e}"
+            detail=f"Erro ao processar ou validar o ficheiro XML: {e}"
         )

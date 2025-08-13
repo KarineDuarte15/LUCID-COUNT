@@ -14,7 +14,7 @@ app = FastAPI(
 
 # Inclui as rotas de cada módulo na aplicação principal
 app.include_router(upload.router)
-app.include_router(documentos.router) # NOVO: Regista o router de documentos
+app.include_router(documentos.router) #Regista o router de documentos
 
 
 @app.get("/", tags=["Root"])
