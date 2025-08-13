@@ -1,0 +1,41 @@
+# Ficheiros de ambiente virtual
+.venv/
+venv/
+env/
+
+# Byte-code compilado e cache do Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ficheiros de configuração de IDEs e editores
+.vscode/
+.idea/
+
+# Ficheiros de sistema operacional
+.DS_Store
+Thumbs.db
+
+# Ficheiros de ambiente e segredos
+# NUNCA envie ficheiros .env para o GitHub!
+.env
+*.env
+
+# Ficheiros de upload e dados gerados
+# Não queremos enviar os ficheiros que os utilizadores enviam para a API
+data/
+uploads/
+
+# Dados do Docker
+# A pasta de dados do PostgreSQL, caso seja criada localmente
+postgres_data/
+
+
+# Relatórios de teste e cobertura de código
+htmlcov/
+.coverage
+.pytest_cache/
+
+# Ficheiros de log.
+*.log
