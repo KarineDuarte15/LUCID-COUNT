@@ -1,4 +1,4 @@
-# main.py (localizado na pasta raiz LUCID-COUNT)
+# main.py 
 
 from fastapi import FastAPI
 

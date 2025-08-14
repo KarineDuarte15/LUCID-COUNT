@@ -6,7 +6,8 @@ import os # Importado para manipulação de ficheiros
 from pathlib import Path
 from typing import Annotated, List
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+# ATUALIZADO: Importa 'Form' para receber dados de formulário junto com os ficheiros
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 # Importações da nossa aplicação
@@ -41,11 +42,13 @@ def get_db():
 @router.post(
     "/files/",
     response_model=List[schemas_documento.Documento],
-    summary="Recebe, valida e regista múltiplos ficheiros",
+    summary="Recebe, valida e regista múltiplos ficheiros de um tipo específico",
     description=f"Faz o upload de um ou mais ficheiros (PDF/XML/TXT, máx {MAX_FILE_SIZE/1024/1024}MB cada), guarda-os e regista os seus metadados na base de dados."
 )
 async def upload_e_registar_multiplos_ficheiros(
-    files: Annotated[List[UploadFile], File(description="Uma lista de ficheiros a serem enviados (PDF, XML ou TXT).")],
+    # ATUALIZADO: Adiciona o parâmetro 'tipo_documento' que vem do formulário
+    tipo_documento: Annotated[str, Form(description="O tipo de documento fiscal (ex: 'Encerramento ISS', 'EFD ICMS').")],
+    files: Annotated[List[UploadFile], File(description="Uma lista de ficheiros a serem enviados.")],
     db: Session = Depends(get_db)
 ):
     """
@@ -90,11 +93,11 @@ async def upload_e_registar_multiplos_ficheiros(
 
         # Interação com a Base de Dados para cada ficheiro
         try:
-            # ATUALIZADO: Lógica para criar o caminho relativo de forma mais segura
-            # Constrói o caminho relativo a partir das nossas constantes
             caminho_relativo_str = str(UPLOAD_DIRECTORY / unique_filename).replace('\\', '/')
 
             documento_a_criar = schemas_documento.DocumentoCreate(
+                # ATUALIZADO: Inclui o tipo de documento ao criar o registo
+                tipo_documento=tipo_documento,
                 nome_arquivo=unique_filename,
                 tipo_arquivo=file.content_type,
                 caminho_arquivo=caminho_relativo_str

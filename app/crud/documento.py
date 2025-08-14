@@ -45,6 +45,7 @@ def criar_novo_documento(db: Session, documento: DocumentoCreate) -> TabelaDocum
     """
     # Cria uma instância do modelo SQLAlchemy com os dados do schema Pydantic
     db_documento = TabelaDocumentos(
+        tipo_documento=documento.tipo_documento, 
         nome_arquivo=documento.nome_arquivo,
         tipo_arquivo=documento.tipo_arquivo,
         caminho_arquivo=documento.caminho_arquivo

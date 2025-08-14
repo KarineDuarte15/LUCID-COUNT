@@ -7,6 +7,7 @@ from datetime import datetime
 # Contém os campos comuns que são partilhados por outros schemas.
 # Isto evita a repetição de código.
 class DocumentoBase(BaseModel):
+    tipo_documento: str 
     nome_arquivo: str
     tipo_arquivo: str
     caminho_arquivo: str

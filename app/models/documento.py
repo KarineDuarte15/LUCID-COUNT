@@ -35,3 +35,6 @@ class TabelaDocumentos(Base):
     # data_upload: A data e hora em que o registo foi criado.
     # O valor padrão é a data e hora atuais do banco de dados.
     data_upload = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # tipo_documento: Coluna para identificar o tipo de documento (ex: "Encerramento ISS")
+    tipo_documento = Column(String, nullable=False, index=True)
