@@ -117,6 +117,16 @@ def _extrair_valor(padrao: str, texto: str) -> Decimal | None:
             return Decimal(valor_str)
         except InvalidOperation: return None
     return None
+def _converter_valor(valor_str: str | None) -> Decimal | None:
+    """Converte uma string de valor (ex: 'R$ 1.234,56') para um objeto Decimal."""
+    if not isinstance(valor_str, str):
+        return None
+    try:
+        # Limpa a string e converte para Decimal
+        valor_limpo = valor_str.replace("R$", "").strip().replace(".", "").replace(",", ".")
+        return Decimal(valor_limpo)
+    except (ValueError, TypeError, InvalidOperation):
+        return None
 
 def _extrair_texto(padrao: str, texto: str) -> str | None:
     match = re.search(padrao, texto, re.IGNORECASE | re.MULTILINE)
@@ -214,10 +224,10 @@ def processar_iss_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
 
     dados: Dict[str, Any] = {
         "cnpj": _extrair_por_regex(r"CNPJ\s*:?\s*([\d./-]+)", texto),
-        "periodo": _normalizar_periodo_mm_aaaa(_extrair_por_regex(r"Compet[êe]ncia\s*:\s*([A-Za-z]+\s+de\s+\d{4})", texto)),        "faturamento_servicos": _extrair_valor(r"Faturamento.*?servi[cç]os\s*prestados.*?([\d.,]+)", texto),
-        "qtd_nfse_emitidas": _extrair_int(r"Serviços\s+Prestados.*?\s+Somatório\s+([\d.]+)", texto),
-        "valor_total_servicos_tomados": _extrair_valor(r"Serviços\s+Tomados.*?\s+Somatório\s+[\d.]+\s+([\d.,]+)", texto),
-        "qtd_nfse_recebidas": _extrair_int(r"Serviços\s+Tomados.*?\s+Somatório\s+([\d.]+)", texto),
+        "periodo": _normalizar_periodo_mm_aaaa(_extrair_por_regex(r"Compet[êe]ncia\s*:\s*([A-Za-z]+\s+de\s+\d{4})", texto)),        
+        "valor_total_servicos_tomados": _extrair_valor(r"Serviços\s+Tomados[\s\S]*?Somatório\s+[\d.]+\s+([\d.,]+)", texto),
+        "valor_total_servicos_tomados": _extrair_valor(r"Serviços\s+Tomados[\s\S]*?Somatório\s+[\d.]+\s+([\d.,]+)", texto),
+        "qtd_nfse_emitidas": _extrair_int(r"Serviços\s+Prestados[\s\S]*?Somatório\s+([\d.]+)", texto),
         "iss_devido": _extrair_valor(r"ISS\s+Próprio[\s\d.,]+?([\d.,]+)\s*$", texto),
     }
     return dados
@@ -245,86 +255,78 @@ def pdf_iss_para_dataframe(dados: Dict[str, Any]) -> pd.DataFrame:
     return df
 
 
+
 # ==========================
 # EFD ICMS (PDF) – Débito/Crédito por período
 # ==========================
 
-def processar_efd_icms_pdf(caminho_arquivo: Path) -> pd.DataFrame:
+def processar_efd_icms_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
     """
-    Extrai CNPJ e (Débito/Crédito) de ICMS por período.
-
-    Retorna um DataFrame com colunas:
-    [CNPJ, Período, Tipo, Valor]
+    Extrai CNPJ, Período e valores de ICMS de um PDF EFD-ICMS.
+    
+    Retorna um DICIONÁRIO com os dados extraídos, compatível com a API.
     """
     texto = _ler_texto_pdf(caminho_arquivo)
 
-    cnpj = _extrair_por_regex(r"CNPJ\s*:?\s*([\d./-]+)", texto)
+    # --- 1. Extração individual de cada campo ---
+    cnpj = _extrair_por_regex(r"CNPJ/CPF:\s*([\d./-]+)", texto)
+    periodo_raw = _extrair_por_regex(r"Período:\s*([\d/]+\s+a\s+[\d/]+)", texto)
+    periodo = _normalizar_periodo_mm_aaaa(periodo_raw)
+    
+    # Extrai os valores da tabela de apuração
+    icms_a_recolher = _extrair_valor(r"Valor\s+total\s+do\s+ICMS\s+a\s+recolher[\s\S]*?R\$\s*([\d.,]+)", texto)
+    saldo_credor = _extrair_valor(r"saldo\s+credor\s+a\s+transportar[\s\S]*?R\$\s*([\d.,]+)", texto)
 
-    # Captura blocos com período e valores de Débito/Crédito
-    # Ex.: "Período: 05/2025 ... Débito: R$ 12.345,67 ... Crédito: R$ 9.876,54"
-    padrao_bloco = re.compile(
-        r"Per[ií]odo\s*:?\s*([^\n]+).*?(D[eé]bito)\s*:?\s*R?\$?\s*([\d.,]+).*?(Cr[eé]dito)\s*:?\s*R?\$?\s*([\d.,]+)",
-        flags=re.IGNORECASE | re.DOTALL,
+    # --- 2. Montagem do dicionário de retorno ---
+    dados = {
+        "cnpj": cnpj,
+        "periodo": periodo,
+        "icms_a_recolher": icms_a_recolher,
+        "saldo_credor_a_transportar": saldo_credor
+    }
+    
+    return dados
+# ==========================
+# EFD Contribuições (PDF) - VERSÃO CORRIGIDA
+# ==========================
+
+def processar_efd_contribuicoes_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
+    """Extrai dados de um PDF de EFD-Contribuições e retorna um dicionário."""
+    texto = _ler_texto_pdf(caminho_arquivo)
+
+    # --- Lógica de extração ---
+    cnpj = _extrair_por_regex(r"CNPJ:\s*([\d./-]+)", texto)
+    periodo = _normalizar_periodo_mm_aaaa(_extrair_por_regex(r"Período\s+de\s+apuração:\s*([\d/]+\s+a\s+[\d/]+)", texto))
+
+
+    match_creditos = re.search(r"Valor\s+total\s+dos\s+créditos\s+descontados[\s\S]*?R\$\s*([\d.,]+)[\s\S]*?R\$\s*([\d.,]+)", texto)
+    pis_credito_str = match_creditos.group(1) if match_creditos else "0.00"
+    cofins_credito_str = match_creditos.group(2) if match_creditos else "0.00"
+
+    match_debitos = re.search(
+        r"= Valor da Contribuição Social a Recolher\s*R\$\s*([\d.,]+)\s*R\$\s*([\d.,]+)",
+        texto
     )
+    pis_debito_str = match_debitos.group(1) if match_debitos else "0.00"
+    cofins_debito_str = match_debitos.group(2) if match_debitos else "0.00"
 
-    registros: List[Tuple[str, str, str, Optional[Decimal]]] = []
-    for m in padrao_bloco.finditer(texto):
-        periodo_raw = m.group(1)
-        periodo = _normalizar_periodo_mm_aaaa(periodo_raw)
-        debito_label = m.group(2).strip().capitalize()
-        debito_val = _limpar_valor_monetario(m.group(3))
-        credito_label = m.group(4).strip().capitalize()
-        credito_val = _limpar_valor_monetario(m.group(5))
-        registros.append((cnpj or "", periodo, "Débito", debito_val))
-        registros.append((cnpj or "", periodo, "Crédito", credito_val))
+    # Se não encontrou créditos/débitos, tenta extrair faturamento total
+    pis_credito = _converter_valor(pis_credito_str)
+    cofins_credito = _converter_valor(cofins_credito_str)
+    pis_debito = _converter_valor(pis_debito_str)
+    cofins_debito = _converter_valor(cofins_debito_str)
 
-    if not registros:
-        # fallback simples: procurar linhas com "Período" e um único valor (saldo)
-        padrao_saldo = re.compile(r"Per[ií]odo\s*:?\s*([^\n]+).*?(Saldo.*?:)\s*([\d.,]+)", re.IGNORECASE | re.DOTALL)
-        for m in padrao_saldo.finditer(texto):
-            periodo = _normalizar_periodo_mm_aaaa(m.group(1))
-            registros.append((cnpj or "", periodo, "Saldo", _limpar_valor_monetario(m.group(3))))
-
-    df = pd.DataFrame(registros, columns=["CNPJ", "Período", "Tipo", "Valor"])
-    return df
-
-
-# ==========================
-# EFD Contribuições (PDF)
-# ==========================
-
-def processar_efd_contribuicoes_pdf(caminho_arquivo: Path) -> pd.DataFrame:
-    """
-    Extrai do PDF: CNPJ, Período, Faturamento total, Crédito/Débito de PIS e COFINS.
-
-    Retorna DataFrame colunas:
-    [CNPJ, Período, Faturamento_Total, PIS_Crédito, PIS_Débito, COFINS_Crédito, COFINS_Débito]
-    """
-    texto = _ler_texto_pdf(caminho_arquivo)
-
-    cnpj = _extrair_por_regex(r"CNPJ\s*:?\s*([\d./-]+)", texto)
-    periodo = _normalizar_periodo_mm_aaaa(_extrair_por_regex(r"Per[ií]odo\s*:?\s*([^\n]+)", texto))
-
-    faturamento_total = _extrair_valor(r"Faturamento\s*Total\s*:?\s*([\d.,]+)", texto) or \
-                         _extrair_valor(r"Receita\s*Bruta\s*Total\s*:?\s*([\d.,]+)", texto)
-
-    pis_credito = _extrair_valor(r"PIS\s*(Cr[eé]dito)\s*:?\s*([\d.,]+)", texto)
-    pis_debito = _extrair_valor(r"PIS\s*(D[eé]bito)\s*:?\s*([\d.,]+)", texto)
-    cofins_credito = _extrair_valor(r"COFINS\s*(Cr[eé]dito)\s*:?\s*([\d.,]+)", texto)
-    cofins_debito = _extrair_valor(r"COFINS\s*(D[eé]bito)\s*:?\s*([\d.,]+)", texto)
-
-    df = pd.DataFrame([{ 
-        "CNPJ": cnpj, 
-        "Período": periodo, 
-        "Faturamento_Total": faturamento_total, 
-        "PIS_Crédito": pis_credito, 
-        "PIS_Débito": pis_debito, 
-        "COFINS_Crédito": cofins_credito, 
-        "COFINS_Débito": cofins_debito,
-    }])
-    return df
-
-
+    # --- Montar o dicionário de resultados ---
+    dados = {
+        "cnpj": cnpj,
+        "periodo": periodo,
+        "pis_credito": pis_credito,
+        "pis_debito": pis_debito,
+        "cofins_credito": cofins_credito,
+        "cofins_debito": cofins_debito,
+    }
+    
+    return dados
 # ==========================
 # MIT (PDF) – CSLL, IRPJ, IPI por período
 # ==========================
