@@ -1,9 +1,14 @@
 # create_tables.py
-
+from app.core.database import Base, engine
 import time
 from sqlalchemy.exc import OperationalError
 from app.core.database import engine, Base
-from app.models import documento # Importa o módulo para que o SQLAlchemy reconheça o modelo
+from app.models.documento import Documento # Importa o módulo para que o SQLAlchemy reconheça o modelo
+from app.models.dados_fiscais import DadosFiscais
+
+print("Criando tabelas no banco de dados...")
+Base.metadata.create_all(bind=engine)
+print("Tabelas criadas com sucesso!")
 
 def create_database_tables():
     """

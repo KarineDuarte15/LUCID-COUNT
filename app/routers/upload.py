@@ -2,18 +2,22 @@
 
 import shutil
 import uuid
-import os # Importado para manipulação de ficheiros
+import os
 from pathlib import Path
 from typing import Annotated, List
 
-# ATUALIZADO: Importa 'Form' para receber dados de formulário junto com os ficheiros
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
+from app.services.processamento import PROCESSADORES
 
 # Importações da nossa aplicação
 from app.core.database import SessionLocal
 from app.crud import documento as crud_documento
 from app.schemas import documento as schemas_documento
+# --- NOVAS IMPORTAÇÕES NECESSÁRIAS ---
+from app.crud import dados_fiscais as crud_dados_fiscais
+from app.services import processamento as services_processamento
+# ------------------------------------
 
 # Cria o roteador
 router = APIRouter(
@@ -46,57 +50,40 @@ def get_db():
     description=f"Faz o upload de um ou mais ficheiros (PDF/XML/TXT, máx {MAX_FILE_SIZE/1024/1024}MB cada), guarda-os e regista os seus metadados na base de dados."
 )
 async def upload_e_registar_multiplos_ficheiros(
-    # ATUALIZADO: Adiciona o parâmetro 'tipo_documento' que vem do formulário
     tipo_documento: Annotated[str, Form(description="O tipo de documento fiscal (ex: 'Encerramento ISS', 'EFD ICMS').")],
     files: Annotated[List[UploadFile], File(description="Uma lista de ficheiros a serem enviados.")],
     db: Session = Depends(get_db)
 ):
     """
-    Endpoint para receber, validar, salvar múltiplos ficheiros e registar na base de dados.
+    Endpoint para receber, validar, salvar, registar E PROCESSAR múltiplos ficheiros.
     """
     UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
     
     documentos_criados = []
 
     for file in files:
-        # Validação de tipo de ficheiro (MIME Type)
+        # Validações de tipo e tamanho (código existente)
         if file.content_type not in ALLOWED_MIME_TYPES:
-            raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail=f"O ficheiro '{file.filename}' tem um tipo não suportado. Use um dos seguintes: {', '.join(ALLOWED_MIME_TYPES)}"
-            )
+            raise HTTPException(...) # Mantém o teu código de erro aqui
 
-        # Gerar nome único e caminho do ficheiro
-        file_extension = Path(file.filename).suffix
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        unique_filename = f"{uuid.uuid4()}{Path(file.filename).suffix}"
         file_path = UPLOAD_DIRECTORY / unique_filename
         
         try:
-            # Lógica de salvar ficheiro primeiro
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
         except Exception as e:
-            # Captura outros erros que possam ocorrer ao salvar o ficheiro
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Não foi possível salvar o ficheiro '{file.filename}' no disco. Erro: {type(e).__name__} - {e}"
-            )
+            raise HTTPException(...) # Mantém o teu código de erro aqui
 
-        # Validação de tamanho APÓS salvar o ficheiro
         file_size = os.path.getsize(file_path)
         if file_size > MAX_FILE_SIZE:
-            os.remove(file_path) # Apaga o ficheiro se for muito grande
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"O ficheiro '{file.filename}' é muito grande ({file_size / 1024 / 1024:.2f}MB). O tamanho máximo permitido é de {MAX_FILE_SIZE / 1024 / 1024:.1f}MB."
-            )
+            os.remove(file_path)
+            raise HTTPException(...) # Mantém o teu código de erro aqui
 
-        # Interação com a Base de Dados para cada ficheiro
+        # Interação com a Base de Dados
         try:
-            caminho_relativo_str = str(UPLOAD_DIRECTORY / unique_filename).replace('\\', '/')
-
+            caminho_relativo_str = str(file_path).replace('\\', '/')
             documento_a_criar = schemas_documento.DocumentoCreate(
-                # ATUALIZADO: Inclui o tipo de documento ao criar o registo
                 tipo_documento=tipo_documento,
                 nome_arquivo=unique_filename,
                 tipo_arquivo=file.content_type,
@@ -106,12 +93,39 @@ async def upload_e_registar_multiplos_ficheiros(
             documento_criado = crud_documento.criar_novo_documento(db=db, documento=documento_a_criar)
             documentos_criados.append(documento_criado)
             
+            # ===================================================================
+            # --- INÍCIO DA LÓGICA DE PROCESSAMENTO E SALVAMENTO AUTOMÁTICO ---
+            # ===================================================================
+            
+            funcao_processamento = PROCESSADORES.get(documento_criado.tipo_documento)
+    
+            if funcao_processamento:
+                print(f"Processando documento ID {documento_criado.id} do tipo '{documento_criado.tipo_documento}'...")
+                try:
+                    caminho_absoluto = Path(documento_criado.caminho_arquivo).resolve()
+                    dados_extraidos = funcao_processamento(caminho_absoluto)
+                    
+                    # Salva os dados extraídos na nova tabela 'dados_fiscais'
+                    crud_dados_fiscais.salvar_dados_fiscais(
+                        db=db, 
+                        documento_id=documento_criado.id, 
+                        dados_extraidos=dados_extraidos
+                    )
+                    print(f"SUCESSO: Dados do documento ID {documento_criado.id} foram extraídos e salvos.")
+                    
+                except Exception as e:
+                    # Se o processamento falhar, o upload não é revertido, mas registamos o erro no terminal
+                    print(f"AVISO: O ficheiro do documento ID {documento_criado.id} foi salvo, mas ocorreu um erro durante o processamento e extração de dados: {e}")
+                    # Opcional: Adicionar uma lógica para marcar o documento como "falha_no_processamento" na base de dados
+            else:
+                print(f"AVISO: Nenhum processador encontrado para o tipo de documento '{documento_criado.tipo_documento}'. O ficheiro foi salvo mas não processado.")
+
+            # ===================================================================
+            # --- FIM DA LÓGICA DE PROCESSAMENTO E SALVAMENTO AUTOMÁTICO ---
+            # ===================================================================
+
         except Exception as e:
-            # Se algo der errado com a base de dados, apaga o ficheiro que foi salvo
             os.remove(file_path)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Não foi possível registar o ficheiro '{file.filename}' na base de dados. Erro: {type(e).__name__} - {e}"
-            )
+            raise HTTPException(...) # Mantém o teu código de erro aqui
             
     return documentos_criados

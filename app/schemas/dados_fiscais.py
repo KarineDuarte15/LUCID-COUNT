@@ -10,7 +10,17 @@ class RespostaProcessamento(BaseModel):
     documento_id: int
     tipo_documento: str
     dados_extraidos: Dict[str, Any]
+class DadosFiscais(BaseModel):
+    id: int
+    documento_id: int
+    tipo_dado: str
+    cnpj: str | None
+    valor_total: Decimal | None
+    impostos: Dict[str, Any] | None
+    data_competencia: date | None
 
+    class Config:
+        from_attributes = True
 # --- Schemas Específicos por Tipo de Documento ---
 
 class DadosEncerramentoISS(BaseModel):

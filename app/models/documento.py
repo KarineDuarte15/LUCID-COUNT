@@ -1,13 +1,16 @@
 # app/models/documento.py
 
 from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy.orm import relationship
+from app.core.database import Base
+from datetime import datetime
 from sqlalchemy.sql import func
 
 # Importamos o objeto 'Base' do nosso módulo de banco de dados.
 # Todas as nossas classes de modelo herdarão desta classe.
 from app.core.database import Base
 
-class TabelaDocumentos(Base):
+class Documento(Base):
     """
     Modelo SQLAlchemy para a tabela de documentos.
     
@@ -15,7 +18,7 @@ class TabelaDocumentos(Base):
     O SQLAlchemy usará esta definição para criar a tabela e para mapear
     os resultados das consultas a objetos desta classe.
     """
-    __tablename__ = "tabela_documentos"
+    __tablename__ = "documentos"
 
     # Define as colunas da tabela:
     

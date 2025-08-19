@@ -17,6 +17,9 @@ import re
 import xmltodict
 import pandas as pd
 
+
+
+
 # PDF
 try:
     import pdfplumber  # type: ignore
@@ -328,67 +331,100 @@ def processar_efd_contribuicoes_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
     
     return dados
 # ==========================
-# MIT (PDF) – CSLL, IRPJ, IPI por período
+# MIT
 # ==========================
 
 def processar_mit_pdf(caminho_arquivo: Path) -> pd.DataFrame:
-    """Extrai de um PDF (MIT): CNPJ, Período, CSLL, IRPJ, IPI."""
+    """
+    Extrai de um PDF de Recibo de Entrega da DCTFWeb os campos:
+    CNPJ, Período, CSLL, IRPJ e IPI.
+    
+    Retorna um DICIONÁRIO com os dados extraídos, compatível com a API.
+    """
     texto = _ler_texto_pdf(caminho_arquivo)
 
-    cnpj = _extrair_por_regex(r"CNPJ\s*:?\s*([\d./-]+)", texto)
-    periodo = _normalizar_periodo_mm_aaaa(_extrair_por_regex(r"Per[ií]odo\s*:?\s*([^\n]+)", texto))
+    # --- 1. Extração dos dados do cabeçalho ---
+    cnpj = _extrair_por_regex(r"CNPJ/CPF\s*([\d./-]+)", texto)
+    periodo = _normalizar_periodo_mm_aaaa(_extrair_por_regex(r"Período\s+de\s+apuração\s*(\d{2}/\d{4})", texto))
 
-    csll = _extrair_valor(r"CSLL\s*:?\s*([\d.,]+)", texto)
-    irpj = _extrair_valor(r"IRPJ\s*:?\s*([\d.,]+)", texto)
-    ipi = _extrair_valor(r"IPI\s*:?\s*([\d.,]+)", texto)
-
-    df = pd.DataFrame([{ "CNPJ": cnpj, "Período": periodo, "CSLL": csll, "IRPJ": irpj, "IPI": ipi }])
-    return df
+    # --- 2. Extração focada apenas nos tributos solicitados ---
+    csll = _extrair_valor(r"CSLL[\s\S]*?R\$\s*([\d.,]+)", texto)
+    irpj = _extrair_valor(r"IRPJ[\s\S]*?R\$\s*([\d.,]+)", texto)
+    ipi = _extrair_valor(r"IPI[\s\S]*?R\$\s*([\d.,]+)", texto)
+    
+    # --- 3. Montagem do dicionário de retorno ---
+    dados = {
+        "cnpj": cnpj,
+        "periodo": periodo,
+        "csll": csll,
+        "irpj": irpj,
+        "ipi": ipi,
+    }
+    
+    return dados
 
 
 # ==========================
 # Declaração PGDAS (PDF)
 # ==========================
 
-def processar_pgdas_pdf(caminho_arquivo: Path) -> pd.DataFrame:
+def processar_pgdas_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
     """
-    Extrai do PDF do PGDAS: CNPJ, Período, Faturamento total, IRPJ, CSLL, PIS, COFINS, ICMS, ISS, Fator R.
+    Extrai dados de um PDF do PGDAS (Simples Nacional), incluindo o Fator R opcional.
+    
+    Retorna um DICIONÁRIO com os dados extraídos, compatível com a API.
     """
     texto = _ler_texto_pdf(caminho_arquivo)
 
-    cnpj = _extrair_por_regex(r"CNPJ\s*:?\s*([\d./-]+)", texto)
-    periodo = _normalizar_periodo_mm_aaaa(_extrair_por_regex(r"Per[ií]odo\s*:?\s*([^\n]+)", texto))
+    # --- 1. Extração dos dados do cabeçalho e resumo ---
+    cnpj = _extrair_por_regex(r"CNPJ\s+Matriz:\s*([\d./-]+)", texto)
+    periodo = _normalizar_periodo_mm_aaaa(_extrair_por_regex(r"Período\s+de\s+Apuração:\s*([\d/]+\s+a\s+[\d/]+)", texto))
+    receita_bruta = _extrair_valor(r"Receita\s+Bruta\s+do\s+PA\s+\(RPA\)[\s\S]*?([\d.,]+)\s*$", texto)
+    
+    # --- 2. Extração de todos os tributos da tabela com uma única regex ---
+    padrao_tributos = r"IRPJ\s+CSLL\s+COFINS\s+PIS/Pasep\s+INSS/CPP\s+ICMS\s+IPI\s+ISS\s+Total[\s\S]*?([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)"
+    
+    match_tributos = re.search(padrao_tributos, texto)
+    
+    if match_tributos:
+        valores = match_tributos.groups()
+        irpj, csll, cofins, pis_pasep, inss_cpp, icms, ipi, iss, total_tributos = map(_converter_valor, valores)
+    else:
+        irpj, csll, cofins, pis_pasep, inss_cpp, icms, ipi, iss, total_tributos = [None] * 9
 
-    faturamento_total = _extrair_valor(r"Faturamento\s*Total\s*:?\s*([\d.,]+)", texto)
-    irpj = _extrair_valor(r"IRPJ\s*:?\s*([\d.,]+)", texto)
-    csll = _extrair_valor(r"CSLL\s*:?\s*([\d.,]+)", texto)
-    pis = _extrair_valor(r"PIS\s*:?\s*([\d.,]+)", texto)
-    cofins = _extrair_valor(r"COFINS\s*:?\s*([\d.,]+)", texto)
-    icms = _extrair_valor(r"ICMS\s*:?\s*([\d.,]+)", texto)
-    iss = _extrair_valor(r"ISS\s*:?\s*([\d.,]+)", texto)
+    # --- 3. Extração opcional do Fator R ---
     fator_r_texto = _extrair_por_regex(r"Fator\s*R\s*:?\s*([\d.,%]+)", texto)
-
-    # normaliza Fator R para Decimal percentual (ex.: 33,5% -> 0.335)
     fator_r: Optional[Decimal] = None
     if fator_r_texto:
-        s = fator_r_texto.replace("%", "").strip()
-        fator = _limpar_valor_monetario(s)
-        if fator is not None:
-            fator_r = (fator / Decimal(100)) if Decimal(0) <= fator <= Decimal(100) else fator
+        # Limpa a string (remove '%') antes de converter
+        valor_sem_percentagem = fator_r_texto.replace("%", "").strip()
+        fator_decimal = _converter_valor(valor_sem_percentagem)
+        
+        # Normaliza para um valor percentual (ex: 28.5 -> 0.285)
+        if fator_decimal is not None:
+            if Decimal(0) <= fator_decimal <= Decimal(100):
+                fator_r = fator_decimal / Decimal(100)
+            else: # Se for um valor já normalizado (ex: 0.285), mantém.
+                fator_r = fator_decimal
 
-    df = pd.DataFrame([{ 
-        "CNPJ": cnpj,
-        "Período": periodo,
-        "Faturamento_Total": faturamento_total,
-        "IRPJ": irpj,
-        "CSLL": csll,
-        "PIS": pis,
-        "COFINS": cofins,
-        "ICMS": icms,
-        "ISS": iss,
-        "Fator_R": fator_r,
-    }])
-    return df
+    # --- 4. Montagem do dicionário de retorno ---
+    dados = {
+        "cnpj": cnpj,
+        "periodo": periodo,
+        "receita_bruta_pa": receita_bruta,
+        "irpj": irpj,
+        "csll": csll,
+        "cofins": cofins,
+        "pis_pasep": pis_pasep,
+        "inss_cpp": inss_cpp,
+        "icms": icms,
+        "ipi": ipi,
+        "iss": iss,
+        "total_debitos_tributos": total_tributos,
+        "fator_r": fator_r, # Campo adicionado
+    }
+    
+    return dados
 
 
 # ==========================
@@ -674,7 +710,20 @@ def pdf_para_dataframe_geral(dados_extraidos: Dict[str, Any], colunas_renomeadas
         raise ValueError("Dado obrigatório (CNPJ) não encontrado no documento.")
         
     return df
-
+# --- DICIONÁRIO DE PROCESSADORES ATUALIZADO ---
+# Garante que este dicionário está atualizado com as funções corretas que criámos.
+PROCESSADORES = {
+    "Encerramento ISS": processar_iss_pdf,
+    "EFD ICMS": processar_efd_icms_pdf,
+    "EFD Contribuições": processar_efd_contribuicoes_pdf,
+    "MIT": processar_mit_pdf, # Nome da função que criámos
+    "PGDAS": processar_pgdas_pdf,     # Nome da função que criámos
+    "NFe": processar_nfe_xml,
+    # As funções abaixo retornam DataFrames e precisam ser ajustadas para retornar dict
+    # se quiseres que o salvamento automático funcione para elas.
+    # "Relatório de Saídas": services_processamento.processar_relatorio_saidas,
+    # "Relatório de Entradas": services_processamento.processar_relatorio_entradas,
+}
 
 
 __all__ = [

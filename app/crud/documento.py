@@ -1,10 +1,12 @@
 # app/crud/documento.py
 
 from sqlalchemy.orm import Session
-from app.models.documento import TabelaDocumentos
 from app.schemas.documento import DocumentoCreate
+from app.models.documento import Documento
+def obter_documento_por_id(db: Session, documento_id: int):
+    return db.query(Documento).filter(Documento.id == documento_id).first() 
 
-def obter_documento_por_id(db: Session, documento_id: int) -> TabelaDocumentos | None:
+def obter_documento_por_id(db: Session, documento_id: int) -> Documento | None:
     """
     Obtém um registo de documento pelo seu ID.
     
@@ -15,9 +17,9 @@ def obter_documento_por_id(db: Session, documento_id: int) -> TabelaDocumentos |
     Returns:
         O objeto SQLAlchemy do documento encontrado ou None se não existir.
     """
-    return db.query(TabelaDocumentos).filter(TabelaDocumentos.id == documento_id).first()
+    return db.query(Documento).filter(Documento.id == documento_id).first()
 
-def obter_documentos(db: Session, skip: int = 0, limit: int = 100) -> list[TabelaDocumentos]:
+def obter_documentos(db: Session, skip: int = 0, limit: int = 100) -> list[Documento]:
     """
     Obtém uma lista de registos de documentos, com paginação.
     
@@ -29,10 +31,10 @@ def obter_documentos(db: Session, skip: int = 0, limit: int = 100) -> list[Tabel
     Returns:
         Uma lista de objetos SQLAlchemy de documentos.
     """
-    return db.query(TabelaDocumentos).offset(skip).limit(limit).all()
+    return db.query(Documento).offset(skip).limit(limit).all()
 
 
-def criar_novo_documento(db: Session, documento: DocumentoCreate) -> TabelaDocumentos:
+def criar_novo_documento(db: Session, documento: DocumentoCreate) -> Documento:
     """
     Cria um novo registo de documento no banco de dados.
     
@@ -44,7 +46,7 @@ def criar_novo_documento(db: Session, documento: DocumentoCreate) -> TabelaDocum
         O objeto SQLAlchemy do documento que foi criado.
     """
     # Cria uma instância do modelo SQLAlchemy com os dados do schema Pydantic
-    db_documento = TabelaDocumentos(
+    db_documento = Documento(
         tipo_documento=documento.tipo_documento, 
         nome_arquivo=documento.nome_arquivo,
         tipo_arquivo=documento.tipo_arquivo,

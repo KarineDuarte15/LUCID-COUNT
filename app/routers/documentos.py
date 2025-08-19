@@ -10,6 +10,9 @@ import pdfplumber
 import xmltodict
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
+from app.crud import dados_fiscais as crud_dados_fiscais
+from app.schemas import dados_fiscais as schemas_dados_fiscais
+from app.services.processamento import PROCESSADORES
 
 # Importações da nossa aplicação
 from app.core.config import settings # Importa as configurações
@@ -19,18 +22,7 @@ from app.schemas import documento as schemas_documento
 from app.schemas.dados_fiscais import RespostaProcessamento
 from app.services import processamento as services_processamento
 
-# Mapeia o 'tipo_documento' da base de dados para a função de processamento correta
-PROCESSADORES = {
-    "Encerramento ISS": services_processamento.processar_iss_pdf,
-    "EFD ICMS": services_processamento.processar_efd_icms_pdf,
-    "EFD Contribuições": services_processamento.processar_efd_contribuicoes_pdf,
-    "MIT": services_processamento.processar_mit_pdf,
-    "Declaração PGDAS": services_processamento.processar_pgdas_pdf,
-    "Relatório de Saídas": services_processamento.processar_relatorio_saidas,
-    "Relatório de Entradas": services_processamento.processar_relatorio_entradas,
-    "NFe": services_processamento.processar_nfe_xml,  # Exemplo de processamento de NFe
-    # Adicione os outros tipos de documento aqui à medida que os for implementando
-}
+
 
 router = APIRouter(
     prefix="/documentos",
