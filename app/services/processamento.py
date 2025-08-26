@@ -112,23 +112,37 @@ def _normalizar_periodo_mm_aaaa(raw: Optional[str]) -> Optional[str]:
     return s  # retorna original se não conseguiu normalizar
 
 # --- Funções Auxiliares para Extração ---
-def _extrair_valor(padrao: str, texto: str) -> Decimal | None:
-    match = re.search(padrao, texto, re.IGNORECASE | re.MULTILINE)
-    if match:
-        valor_str = match.group(1).strip().replace('.', '').replace(',', '.')
-        try:
-            return Decimal(valor_str)
-        except InvalidOperation: return None
-    return None
-def _converter_valor(valor_str: str | None) -> Decimal | None:
+def _extrair_valor(padrao: str, texto: str, multi_linha: bool = False) -> Decimal | None:
+    """
+    Extrai um valor monetário de um texto usando regex.
+
+    Argumentos:
+        padrao: A expressão regular a ser procurada. Deve ter um grupo de captura para o valor.
+        texto: O texto onde procurar.
+        multi_linha: Se True, permite que a regex procure através de quebras de linha (re.DOTALL).
+    """
+    flags = re.DOTALL if multi_linha else 0
+    
+    match = re.search(padrao, texto, flags=flags)
+    
+    if not match:
+        return None
+
+    # Assume que o valor está no primeiro grupo de captura da regex
+    valor_str = match.group(1)
+    
+    # Reutiliza a função de conversão que já temos para limpar e converter o valor
+    return _converter_valor(valor_str)
+
+def _converter_valor(valor_str: Any) -> Decimal | None:
     """Converte uma string de valor (ex: 'R$ 1.234,56') para um objeto Decimal."""
-    if not isinstance(valor_str, str):
+    if valor_str is None:
         return None
     try:
-        # Limpa a string e converte para Decimal
-        valor_limpo = valor_str.replace("R$", "").strip().replace(".", "").replace(",", ".")
-        return Decimal(valor_limpo)
-    except (ValueError, TypeError, InvalidOperation):
+        # Lógica corrigida: remove "R$", espaços, depois os pontos de milhar, e finalmente troca a vírgula decimal por ponto.
+        limpo = str(valor_str).replace("R$", "").strip().replace(".", "").replace(",", ".")
+        return Decimal(limpo)
+    except (TypeError, InvalidOperation):
         return None
 
 def _extrair_texto(padrao: str, texto: str) -> str | None:
@@ -228,10 +242,10 @@ def processar_iss_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
     dados: Dict[str, Any] = {
         "cnpj": _extrair_por_regex(r"CNPJ\s*:?\s*([\d./-]+)", texto),
         "periodo": _normalizar_periodo_mm_aaaa(_extrair_por_regex(r"Compet[êe]ncia\s*:\s*([A-Za-z]+\s+de\s+\d{4})", texto)),        
-        "valor_total_servicos_tomados": _extrair_valor(r"Serviços\s+Tomados[\s\S]*?Somatório\s+[\d.]+\s+([\d.,]+)", texto),
-        "valor_total_servicos_tomados": _extrair_valor(r"Serviços\s+Tomados[\s\S]*?Somatório\s+[\d.]+\s+([\d.,]+)", texto),
+        "valor_total": _extrair_valor(r"Serviços\s+Prestados[\s\S]*?Somatório\s+[\d.]+\s+([\d.,]+)", texto),
         "qtd_nfse_emitidas": _extrair_int(r"Serviços\s+Prestados[\s\S]*?Somatório\s+([\d.]+)", texto),
         "iss_devido": _extrair_valor(r"ISS\s+Próprio[\s\d.,]+?([\d.,]+)\s*$", texto),
+        "iss_retido": _extrair_valor(r"A\s+Recolher\s+no\s+Município[\s\S]*?ISS\s+Retido[\s\S]*?([\d.,]+)", texto)
     }
     return dados
 
@@ -368,22 +382,35 @@ def processar_mit_pdf(caminho_arquivo: Path) -> pd.DataFrame:
 # Declaração PGDAS (PDF)
 # ==========================
 
+# Em: app/services/processamento.py
+
 def processar_pgdas_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
     """
     Extrai dados de um PDF do PGDAS (Simples Nacional), incluindo o Fator R opcional.
-    
-    Retorna um DICIONÁRIO com os dados extraídos, compatível com a API.
     """
     texto = _ler_texto_pdf(caminho_arquivo)
-
-    # --- 1. Extração dos dados do cabeçalho e resumo ---
+    # --- 1. Extração de dados principais ---
+    # --- REGEX CORRIGIDAS E MAIS ESPECÍFICAS ---
     cnpj = _extrair_por_regex(r"CNPJ\s+Matriz:\s*([\d./-]+)", texto)
     periodo = _normalizar_periodo_mm_aaaa(_extrair_por_regex(r"Período\s+de\s+Apuração:\s*([\d/]+\s+a\s+[\d/]+)", texto))
-    receita_bruta = _extrair_valor(r"Receita\s+Bruta\s+do\s+PA\s+\(RPA\)[\s\S]*?([\d.,]+)\s*$", texto)
     
-    # --- 2. Extração de todos os tributos da tabela com uma única regex ---
-    padrao_tributos = r"IRPJ\s+CSLL\s+COFINS\s+PIS/Pasep\s+INSS/CPP\s+ICMS\s+IPI\s+ISS\s+Total[\s\S]*?([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)"
+    # Procura a linha "Receita Bruta do PA" e captura o TERCEIRO valor numérico (a coluna Total)
+    receita_bruta_pa = _extrair_valor(r"Receita\s+Bruta\s+do\s+PA\s+\(RPA\)\s+-\s+Competência\s+[\d.,]+\s+[\d.,]+\s+([\d.,]+)", texto)
     
+    # Procura a linha "RBT12" e captura o TERCEIRO valor numérico
+    rbt12 = _extrair_valor(r"RBT12\)[\s\S]*?[\d.,]+\s+[\d.,]+\s+([\d.,]+)", texto, multi_linha=True)
+    
+    # Procura a linha "RBA" e captura o TERCEIRO valor numérico
+    rba = _extrair_valor(r"\(RBA\)[\s\S]*?[\d.,]+\s+[\d.,]+\s+([\d.,]+)", texto, multi_linha=True)
+    
+    limite_faturamento = _extrair_valor(r"Limite\s+de\s+receita\s+bruta[\s\S]*?([\d.,]+)", texto)
+
+    # --- REGEX DOS TRIBUTOS CORRIGIDA ---
+    padrao_tributos = (
+        r"Total\s+Geral\s+da\s+Empresa[\s\S]*?" # Ancora na secção final
+        r"IRPJ\s+CSLL\s+COFINS\s+PIS/Pasep\s+INSS/CPP\s+ICMS\s+IPI\s+ISS\s+Total"
+        r"[\s\S]*?([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)"
+    )
     match_tributos = re.search(padrao_tributos, texto)
     
     if match_tributos:
@@ -392,7 +419,7 @@ def processar_pgdas_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
     else:
         irpj, csll, cofins, pis_pasep, inss_cpp, icms, ipi, iss, total_tributos = [None] * 9
 
-    # --- 3. Extração opcional do Fator R ---
+ # --- 3. Extração opcional do Fator R ---
     fator_r_texto = _extrair_por_regex(r"Fator\s*R\s*:?\s*([\d.,%]+)", texto)
     fator_r: Optional[Decimal] = None
     if fator_r_texto:
@@ -407,11 +434,14 @@ def processar_pgdas_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
             else: # Se for um valor já normalizado (ex: 0.285), mantém.
                 fator_r = fator_decimal
 
-    # --- 4. Montagem do dicionário de retorno ---
+    # --- Montagem do dicionário de retorno ---
     dados = {
         "cnpj": cnpj,
         "periodo": periodo,
-        "receita_bruta_pa": receita_bruta,
+        "receita_bruta_pa": receita_bruta_pa,
+        "receita_bruta_acumulada_rbt12": rbt12, # NOVO
+        "receita_bruta_acumulada_rba": rba,     # NOVO
+        "limite_faturamento": limite_faturamento, # NOVO
         "irpj": irpj,
         "csll": csll,
         "cofins": cofins,
@@ -421,7 +451,7 @@ def processar_pgdas_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
         "ipi": ipi,
         "iss": iss,
         "total_debitos_tributos": total_tributos,
-        "fator_r": fator_r, # Campo adicionado
+        "fator_r": fator_r,
     }
     
     return dados
