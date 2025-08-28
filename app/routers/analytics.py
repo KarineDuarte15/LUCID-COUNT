@@ -3,8 +3,10 @@ from sqlalchemy.orm import Session
 from datetime import date 
 # Importa o módulo da  aplicação
 from app.core.database import SessionLocal # Assume que get_db está aqui
-from app.services import analytics as analytics_service
-from app.schemas import analytics as schemas_analytics
+from app.services import analytics_service # Importa o serviço de analytics
+from app.schemas import analytics_schema as schemas_analytics # Importa os schemas de analytics
+from app.services.analytics_service import _formatar_monetario, _formatar_percentual
+
 
 # Cria o roteador
 router = APIRouter(
@@ -58,9 +60,9 @@ def obter_kpis_por_periodo(
         regime_consultado=regime,
         periodo_inicio=data_inicio,
         periodo_fim=data_fim,
-        carga_tributaria_percentual=carga_tributaria,
-        ticket_medio=ticket_medio,
-        crescimento_faturamento_percentual=crescimento,
+        carga_tributaria_percentual=_formatar_percentual(carga_tributaria),
+        ticket_medio=_formatar_monetario(ticket_medio),
+        crescimento_faturamento_percentual=_formatar_percentual(crescimento),
         total_impostos_por_tipo=impostos_agregados,
     )
     
