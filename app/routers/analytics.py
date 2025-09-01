@@ -6,7 +6,7 @@ from app.core.database import SessionLocal # Assume que get_db está aqui
 from app.services import analytics_service # Importa o serviço de analytics
 from app.schemas import analytics_schema as schemas_analytics # Importa os schemas de analytics
 from app.services.analytics_service import _formatar_monetario, _formatar_percentual
-
+from app.schemas.tipos import RegimeTributario 
 
 # Cria o roteador
 router = APIRouter(
@@ -30,7 +30,8 @@ def get_db():
 def obter_kpis_por_periodo(
     # Parâmetros de consulta que o utilizador irá fornecer
     cnpj: str,
-    regime: str,
+    # ALTERADO: 'regime' agora usa o Enum, o que cria o menu suspenso
+    regime: RegimeTributario, 
     data_inicio: date,
     data_fim: date,
     db: Session = Depends(get_db)

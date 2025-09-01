@@ -6,9 +6,10 @@ from fastapi.encoders import jsonable_encoder
 from fastapi import FastAPI
 
 # Importa os nossos routers
-from app.routers import upload, documentos
+from app.routers import upload, documentos, charts_router
 # Importa o router de analytics
 from app.routers import analytics as analytics_router
+from app.routers import upload_options
 
 # ---  resposta personalizada ---
 class CustomJSONResponse(JSONResponse):
@@ -41,7 +42,8 @@ app = FastAPI(
 app.include_router(upload.router)
 app.include_router(documentos.router) #Regista o router de documentos
 app.include_router(analytics_router.router) # Regista o router de analytics
-
+app.include_router(charts_router.router)
+app.include_router(upload_options.router)
 
 @app.get("/", tags=["Root"])
 def read_root():

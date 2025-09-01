@@ -9,6 +9,7 @@ from typing import Annotated, List
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 from app.services.processamento import PROCESSADORES
+from app.schemas.tipos import TipoDocumento
 
 # Importações da nossa aplicação
 from app.core.database import SessionLocal
@@ -50,7 +51,8 @@ def get_db():
     description=f"Faz o upload de um ou mais ficheiros (PDF/XML/TXT, máx {MAX_FILE_SIZE/1024/1024}MB cada), guarda-os e regista os seus metadados na base de dados."
 )
 async def upload_e_registar_multiplos_ficheiros(
-    tipo_documento: Annotated[str, Form(description="O tipo de documento fiscal (ex: 'Encerramento ISS', 'EFD ICMS').")],
+    # ALTERADO: Agora tipo_documento é do tipo Enum
+    tipo_documento: Annotated[TipoDocumento, Form(description="O tipo de documento fiscal.")],
     files: Annotated[List[UploadFile], File(description="Uma lista de ficheiros a serem enviados.")],
     db: Session = Depends(get_db)
 ):
@@ -63,8 +65,9 @@ async def upload_e_registar_multiplos_ficheiros(
 
     for file in files:
         # Validações de tipo e tamanho (código existente)
-        if file.content_type not in ALLOWED_MIME_TYPES:
-            raise HTTPException(...) # Mantém o teu código de erro aqui
+        for file in files:
+         if file.content_type not in ALLOWED_MIME_TYPES:
+            raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=f"Tipo de ficheiro '{file.content_type}' não suportado.") # Mantém o teu código de erro aqui
 
         unique_filename = f"{uuid.uuid4()}{Path(file.filename).suffix}"
         file_path = UPLOAD_DIRECTORY / unique_filename
@@ -73,12 +76,12 @@ async def upload_e_registar_multiplos_ficheiros(
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
         except Exception as e:
-            raise HTTPException(...) # Mantém o teu código de erro aqui
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Não foi possível salvar o ficheiro: {e}")
 
         file_size = os.path.getsize(file_path)
         if file_size > MAX_FILE_SIZE:
             os.remove(file_path)
-            raise HTTPException(...) # Mantém o teu código de erro aqui
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=f"O ficheiro excede o tamanho máximo de {MAX_FILE_SIZE/1024/1024}MB.")
 
         # Interação com a Base de Dados
         try:
