@@ -1,27 +1,25 @@
 # create_tables.py
-from app.core.database import Base, engine
 import time
 from sqlalchemy.exc import OperationalError
-from app.core.database import engine, Base
-from app.models.documento import Documento # Importa o módulo para que o SQLAlchemy reconheça o modelo
-from app.models.dados_fiscais import DadosFiscais
 
-print("Criando tabelas no banco de dados...")
-Base.metadata.create_all(bind=engine)
-print("Tabelas criadas com sucesso!")
+from app.core.database import engine, Base
+# --- ALTERAÇÃO: Importar TODOS os modelos ---
+# É crucial importar todos os modelos para que o SQLAlchemy os "veja"
+# e entenda as relações entre eles antes de criar as tabelas.
+from app.models.empresa import Empresa
+from app.models.documento import Documento
+from app.models.dados_fiscais import DadosFiscais
 
 def create_database_tables():
     """
-    Tenta conectar ao banco de dados e cria todas as tabelas definidas
-    pelo Base do SQLAlchemy.
+    Conecta-se à base de dados, apaga todas as tabelas existentes (para garantir uma estrutura limpa)
+    e cria todas as tabelas novamente com base nos modelos SQLAlchemy importados.
     """
     print("A tentar conectar ao banco de dados...")
     
-
     retries = 5
     while retries > 0:
         try:
-            # Tenta estabelecer uma conexão
             connection = engine.connect()
             connection.close()
             print("✅ Conexão com o banco de dados bem-sucedida!")
@@ -35,14 +33,20 @@ def create_database_tables():
         print("🚨 Não foi possível conectar ao banco de dados após várias tentativas. Abortando.")
         return
 
-    print("\nA criar tabelas no banco de dados...")
     try:
-        # O comando mágico: cria todas as tabelas que herdam de Base
+        # --- ALTERAÇÃO: Apagar tabelas antigas antes de criar ---
+        print("\nA apagar tabelas antigas (se existirem)...")
+        Base.metadata.drop_all(bind=engine)
+        print("✅ Tabelas antigas apagadas com sucesso.")
+
+        # --- Criação das tabelas ---
+        print("\nA criar novas tabelas (Empresas, Documentos, Dados Fiscais)...")
         Base.metadata.create_all(bind=engine)
-        print("✅ Tabelas criadas com sucesso!")
-        print("Pode verificar a tabela 'tabela_documentos' usando o DBeaver.")
+        print("✅ Tabelas relacionadas criadas com sucesso!")
+        print("Pode agora executar o script 'adicionar_empresa.py' para popular os dados de teste.")
+
     except Exception as e:
-        print(f"🚨 Ocorreu um erro ao criar as tabelas: {e}")
+        print(f"🚨 Ocorreu um erro ao recriar as tabelas: {e}")
 
 if __name__ == "__main__":
     create_database_tables()

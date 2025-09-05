@@ -18,6 +18,7 @@ from app.schemas import documento as schemas_documento
 # --- NOVAS IMPORTAÇÕES NECESSÁRIAS ---
 from app.crud import dados_fiscais as crud_dados_fiscais
 from app.services import processamento as services_processamento
+from app.crud import empresa as crud_empresa 
 # ------------------------------------
 
 # Cria o roteador
@@ -52,6 +53,7 @@ def get_db():
 )
 async def upload_e_registar_multiplos_ficheiros(
     # ALTERADO: Agora tipo_documento é do tipo Enum
+    cnpj: Annotated[str, Form(description="CNPJ da empresa à qual os documentos pertencem.")],
     tipo_documento: Annotated[TipoDocumento, Form(description="O tipo de documento fiscal.")],
     files: Annotated[List[UploadFile], File(description="Uma lista de ficheiros a serem enviados.")],
     db: Session = Depends(get_db)
@@ -60,16 +62,27 @@ async def upload_e_registar_multiplos_ficheiros(
     Endpoint para receber, validar, salvar, registar E PROCESSAR múltiplos ficheiros.
     """
     UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    
+    empresa = crud_empresa.get_empresa_por_cnpj(db, cnpj=cnpj)
+    if not empresa:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Nenhuma empresa encontrada com o CNPJ {cnpj}. Por favor, cadastre a empresa primeiro."
+        )
     documentos_criados = []
 
     for file in files:
         # Validações de tipo e tamanho (código existente)
-        for file in files:
-         if file.content_type not in ALLOWED_MIME_TYPES:
-            raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=f"Tipo de ficheiro '{file.content_type}' não suportado.") # Mantém o teu código de erro aqui
+         # --- CORREÇÃO: Validação no nível correto do loop ---
+        if file.content_type not in ALLOWED_MIME_TYPES:
+            raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=f"Tipo de ficheiro '{file.content_type}' não suportado para '{file.filename}'.")
 
-        unique_filename = f"{uuid.uuid4()}{Path(file.filename).suffix}"
+        # --- MUDANÇA: Lógica para criar um nome de ficheiro descritivo e único ---
+        extensao = Path(file.filename).suffix
+        # Remove caracteres especiais do tipo de documento para usar no nome do ficheiro
+        tipo_doc_safe = tipo_documento.value.replace(" ", "_").replace("/", "-")
+        # Novo formato: CNPJ-TipoDocumento-UUID.extensao
+        unique_filename = f"{cnpj.replace('/', '').replace('.', '')}-{tipo_doc_safe}-{uuid.uuid4()}{extensao}"
+        
         file_path = UPLOAD_DIRECTORY / unique_filename
         
         try:
@@ -81,19 +94,27 @@ async def upload_e_registar_multiplos_ficheiros(
         file_size = os.path.getsize(file_path)
         if file_size > MAX_FILE_SIZE:
             os.remove(file_path)
-            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=f"O ficheiro excede o tamanho máximo de {MAX_FILE_SIZE/1024/1024}MB.")
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=f"O ficheiro '{file.filename}' excede o tamanho máximo de {MAX_FILE_SIZE/1024/1024}MB.")
 
-        # Interação com a Base de Dados
         try:
             caminho_relativo_str = str(file_path).replace('\\', '/')
+            
+            # --- MUDANÇA: Usar os novos campos do schema ---
             documento_a_criar = schemas_documento.DocumentoCreate(
-                tipo_documento=tipo_documento,
-                nome_arquivo=unique_filename,
+                empresa_id=empresa.id, 
+                tipo_documento=tipo_documento.value, # Salva o valor string do Enum
+                nome_arquivo_original=file.filename,
+                nome_arquivo_unico=unique_filename,
                 tipo_arquivo=file.content_type,
                 caminho_arquivo=caminho_relativo_str
             )
             
-            documento_criado = crud_documento.criar_novo_documento(db=db, documento=documento_a_criar)
+            documento_criado = crud_documento.criar_novo_documento(
+                db=db, 
+                documento=documento_a_criar, 
+                empresa_id=empresa.id 
+            )
+            
             documentos_criados.append(documento_criado)
             
             # ===================================================================

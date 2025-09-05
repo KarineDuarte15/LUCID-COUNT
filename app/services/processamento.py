@@ -3,7 +3,7 @@
 import xmltodict
 import pandas as pd
 import re
-import pdfplumber 
+import pdfplumber
 from pathlib import Path
 from typing import Dict, Any, List
 from decimal import Decimal, InvalidOperation
@@ -404,6 +404,7 @@ def processar_pgdas_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
     rba = _extrair_valor(r"\(RBA\)[\s\S]*?[\d.,]+\s+[\d.,]+\s+([\d.,]+)", texto, multi_linha=True)
     
     limite_faturamento = _extrair_valor(r"Limite\s+de\s+receita\s+bruta[\s\S]*?([\d.,]+)", texto)
+    sublimite_receita = _extrair_valor(r"Sublimite\s+de\s+Receita\s+Anual\s+\(R\$\):\s*([\d.,]+)", texto)
 
     # --- REGEX DOS TRIBUTOS CORRIGIDA ---
     padrao_tributos = (
@@ -439,9 +440,10 @@ def processar_pgdas_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
         "cnpj": cnpj,
         "periodo": periodo,
         "receita_bruta_pa": receita_bruta_pa,
-        "receita_bruta_acumulada_rbt12": rbt12, # NOVO
-        "receita_bruta_acumulada_rba": rba,     # NOVO
-        "limite_faturamento": limite_faturamento, # NOVO
+        "receita_bruta_acumulada_rbt12": rbt12, 
+        "receita_bruta_acumulada_rba": rba,     
+        "limite_faturamento": limite_faturamento, 
+        "sublimite_receita": sublimite_receita, 
         "irpj": irpj,
         "csll": csll,
         "cofins": cofins,

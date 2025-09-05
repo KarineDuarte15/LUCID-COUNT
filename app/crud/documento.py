@@ -34,32 +34,32 @@ def obter_documentos(db: Session, skip: int = 0, limit: int = 100) -> list[Docum
     return db.query(Documento).offset(skip).limit(limit).all()
 
 
-def criar_novo_documento(db: Session, documento: DocumentoCreate) -> Documento:
+
+def criar_novo_documento(db: Session, documento: DocumentoCreate, empresa_id: int) -> Documento:
     """
     Cria um novo registo de documento no banco de dados.
     
     Args:
         db: A sessão do banco de dados.
         documento: Um objeto Pydantic com os dados do documento a ser criado.
+        empresa_id: O ID da empresa à qual este documento pertence.
         
     Returns:
         O objeto SQLAlchemy do documento que foi criado.
     """
     # Cria uma instância do modelo SQLAlchemy com os dados do schema Pydantic
     db_documento = Documento(
-        tipo_documento=documento.tipo_documento, 
-        nome_arquivo=documento.nome_arquivo,
+        empresa_id=empresa_id,
+        tipo_documento=documento.tipo_documento,
+        # MUDANÇA: Salvar os novos campos
+        nome_arquivo_original=documento.nome_arquivo_original,
+        nome_arquivo_unico=documento.nome_arquivo_unico,
         tipo_arquivo=documento.tipo_arquivo,
         caminho_arquivo=documento.caminho_arquivo
     )
     
-    # Adiciona a nova instância à sessão
     db.add(db_documento)
-    
-    # Confirma (commit) a transação para salvar no banco de dados
     db.commit()
-    
-    # Atualiza a instância com os dados do banco (como o ID gerado)
     db.refresh(db_documento)
     
     return db_documento
