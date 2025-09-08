@@ -81,23 +81,44 @@ def _extrair_int(pattern: str, texto: str) -> Optional[int]:
         return None
 
 
+# Em: app/services/processamento.py
+
+# ... (outras importações e funções)
+
 def _normalizar_periodo_mm_aaaa(raw: Optional[str]) -> Optional[str]:
-    """Aceita formatos como 05/2025, 2025-05, Maio/2025, etc., e tenta retornar MM/AAAA."""
+    """
+    Aceita vários formatos de data, incluindo "DD/MM/AAAA até DD/MM/AAAA",
+    e tenta sempre retornar o formato MM/AAAA.
+    """
     if not raw:
         return None
     s = raw.strip()
+
+    # --- NOVA LÓGICA ---
+    # Primeiro, procura por um padrão de data completo como "01/07/2025" no início da string.
+    # Este padrão é mais específico e irá capturar corretamente o mês e o ano.
+    # Padrão: (DD) / (MM) / (AAAA)
+    match_intervalo = re.search(r"^\s*\d{2}\s*/\s*(0?[1-9]|1[0-2])\s*/\s*(\d{4})", s)
+    if match_intervalo:
+        mm = match_intervalo.group(1).zfill(2)
+        aaaa = match_intervalo.group(2)
+        return f"{mm}/{aaaa}"
+
+    # --- LÓGICA ANTERIOR MANTIDA COMO FALLBACK ---
     # MM/AAAA
     m = re.search(r"(0?[1-9]|1[0-2])\s*[/.-]\s*(\d{4})", s)
     if m:
         mm = m.group(1).zfill(2)
         aaaa = m.group(2)
         return f"{mm}/{aaaa}"
+        
     # AAAA-MM
     m = re.search(r"(\d{4})\s*[-/.]\s*(0?[1-9]|1[0-2])", s)
     if m:
         aaaa = m.group(1)
         mm = m.group(2).zfill(2)
         return f"{mm}/{aaaa}"
+        
     # Nome do mês/AAAA (básico)
     meses = {
         "janeiro": "01", "fevereiro": "02", "março": "03", "marco": "03", "abril": "04",
@@ -109,7 +130,9 @@ def _normalizar_periodo_mm_aaaa(raw: Optional[str]) -> Optional[str]:
         mm = meses.get(m.group(1).lower())
         if mm:
             return f"{mm}/{m.group(2)}"
-    return s  # retorna original se não conseguiu normalizar
+
+    return None  # Retorna None se nenhum formato for reconhecido
+
 
 # --- Funções Auxiliares para Extração ---
 def _extrair_valor(padrao: str, texto: str, multi_linha: bool = False) -> Decimal | None:
@@ -460,20 +483,66 @@ def processar_pgdas_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
 
 
 # ==========================
-# Relatório de Saídas / Entradas (PDF/CSV/XLSX)
+# Relatório de Entradas/saídas (PDF/CSV/XLSX)
 # ==========================
 
 # CFOPs comumente não incidentes em faturamento (exemplo; ajuste conforme sua regra)
 CFOPS_NAO_INCIDENTES_PADRAO: set[str] = {
-    "5.949", "6.949",  # Outras saídas de mercadoria/serviço
-    "5.201", "6.201",  # Devolução de venda
-    "5.202", "6.202",  # Devolução de venda
-    "5.556", "6.556",  # Remessa para conserto/beneficiamento
+    # --- Devoluções de Venda (Entradas) ---
+    "1.201", "2.201", "3.201",  # Devolução de venda de produção do estabelecimento
+    "1.202", "2.202", "3.202",  # Devolução de venda de mercadoria de terceiros
+    "1.203", "2.203",          # Devolução de venda de produção do estabelecimento (ZFM/ALC)
+    "1.204", "2.204",          # Devolução de venda de mercadoria de terceiros (ZFM/ALC)
+    "1.208", "2.208",          # Devolução de produção do estabelecimento, remetida em transferência
+    "1.209", "2.209",          # Devolução de mercadoria de terceiros, remetida em transferência
+    "1.410", "2.410",          # Devolução de venda de produção do estabelecimento (ST)
+    "1.411", "2.411",          # Devolução de venda de mercadoria de terceiros (ST)
+    "1.553", "2.553", "3.553",  # Devolução de venda de bem do ativo imobilizado
+    "1.660", "2.660",          # Devolução de venda de combustível para industrialização
+    "1.661", "2.661",          # Devolução de venda de combustível para comercialização
+    "1.662", "2.662",          # Devolução de venda de combustível para consumidor final
+    "3.211",                   # Devolução de venda de produção do estabelecimento (drawback)
+    
+    # --- Devoluções relacionadas à Exportação (Entradas) ---
+    "1.503", "2.503",          # Devolução de produto de produção própria remetido para exportação
+    "1.504", "2.504",          # Devolução de mercadoria de terceiros remetida para exportação
+    "1.505", "2.505",          # Devolução simbólica de mercadoria (lote exportação, prod. própria)
+    "1.506", "2.506",          # Devolução simbólica de mercadoria (lote exportação, de terceiros)
+    "3.503",                   # Devolução de mercadoria exportada recebida com fim específico
+
+    # --- Devoluções de Consignação (Entradas) ---
+    "1.918", "2.918",          # Devolução de mercadoria remetida em consignação
+    "1.919", "2.919",          # Devolução simbólica de mercadoria vendida em consignação
+
+    # --- Devoluções de Compra (Saídas) ---
+    "5.201", "6.201", "7.201",  # Devolução de compra para industrialização ou produção rural
+    "5.202", "6.202", "7.202",  # Devolução de compra para comercialização
+    "5.208", "6.208",          # Devolução de transferência para industrialização ou produção rural
+    "5.209", "6.209",          # Devolução de transferência para comercialização
+    "5.210", "6.210", "7.210",  # Devolução de compra para uso na prestação de serviço
+    "5.410", "6.410",          # Devolução de compra para industrialização (ST)
+    "5.411", "6.411",          # Devolução de compra para comercialização (ST)
+    "5.412", "6.412",          # Devolução de bem do ativo imobilizado (ST)
+    "5.413", "6.413",          # Devolução de mercadoria para uso ou consumo (ST)
+    "5.553", "6.553", "7.553",  # Devolução de compra de bem para o ativo imobilizado
+    "5.556", "6.556", "7.556",  # Devolução de compra de material de uso ou consumo
+    "5.660", "6.660",          # Devolução de compra de combustível para industrialização
+    "5.661", "6.661",          # Devolução de compra de combustível para comercialização
+    "5.662", "6.662",          # Devolução de compra de combustível por consumidor final
+    "7.211",                   # Devolução de compra para industrialização (drawback)
+
+    # --- Outras Devoluções (Saídas) ---
+    "5.503", "6.503",          # Devolução de mercadoria recebida para exportação
+    "5.555", "6.555",          # Devolução de bem do ativo imobilizado de terceiro, recebido para uso
+    "5.918", "6.918",          # Devolução de mercadoria recebida em consignação
+    "5.919", "6.919",          # Devolução simbólica de mercadoria recebida em consignação
+    "5.921", "6.921",          # Devolução de vasilhame ou sacaria
 }
 
 
 def _ler_tabela_arquivo(caminho: Path) -> pd.DataFrame:
     """Lê CSV/XLSX em DataFrame. Se PDF, tenta heurística de tabela a partir do texto."""
+    
     _arquivo_existe(caminho)
     ext = caminho.suffix.lower()
     if ext in {".csv"}:
@@ -580,37 +649,57 @@ def processar_relatorio_saidas(caminho_arquivo: Path, cfops_nao_incidentes: Opti
     return df[["CNPJ", "Período", "Faturamento", "CFOP", "Incide_Faturamento", "UF"]]
 
 
-def processar_relatorio_entradas(caminho_arquivo: Path) -> pd.DataFrame:
+# Em: app/services/processamento.py
+# ... (mantenha as outras importações e funções como estão)
+
+def processar_relatorio_entradas(caminho_arquivo: Path) -> Dict[str, Any]:
     """
-    Lê relatório de entradas e retorna DataFrame com:
-    [CNPJ, Período, Valor_Total_Entradas, CFOP, UF]
+    Lê relatório de entradas, extrai CNPJ e Período do cabeçalho do PDF,
+    processa a tabela e retorna um DICIONÁRIO com os dados consolidados.
     """
+    # Passo 1: Ler o texto completo do PDF para extrair o cabeçalho
+    texto_completo = _ler_texto_pdf(caminho_arquivo)
+    
+    # Passo 2: Extrair CNPJ e Período do texto completo usando regex
+    # Regex para o CNPJ, buscando por "CNP)" ou "CNPJ:"
+    cnpj_extraido = _extrair_por_regex(r"CNP\w*:\s*([\d./-]+)", texto_completo)
+    
+    # Regex para o Período, buscando pela palavra "Periodo:"
+    periodo_extraido = _extrair_por_regex(r"Periodo:\s*([\d/]+\s+at[eé]\s+[\d/]+)", texto_completo)
+    periodo_normalizado = _normalizar_periodo_mm_aaaa(periodo_extraido)
+
+    # Passo 3: Ler os dados da tabela do arquivo (PDF, CSV, etc.)
     df = _ler_tabela_arquivo(caminho_arquivo)
     df = _normalizar_colunas_mov(df)
 
-    for col in ["CNPJ", "Período", "Valor_Total_Entradas", "CFOP", "UF"]:
+    # Garante que as colunas essenciais existam
+    for col in ["Valor_Total_Entradas", "CFOP", "UF"]:
         if col not in df.columns:
-            if col == "Valor_Total_Entradas" and "Valor_Total" in df.columns:
-                df[col] = df["Valor_Total"]
-            elif col == "Valor_Total_Entradas" and "Valor" in df.columns:
-                df[col] = df["Valor"]
+            if col == "Valor_Total_Entradas" and "Valor" in df.columns:
+                df = df.rename(columns={"Valor": col})
             else:
                 df[col] = None
 
-    # normalizações
-    df["Período"] = df["Período"].map(_normalizar_periodo_mm_aaaa)
+    # Converte os valores monetários para Decimal
+    df["Valor_Total_Entradas"] = df["Valor_Total_Entradas"].apply(
+        lambda v: _limpar_valor_monetario(str(v)) if pd.notna(v) else None
+    )
 
-    def fmt_cfop(x: Any) -> Optional[str]:
-        if pd.isna(x):
-            return None
-        s = str(x)
-        d = re.sub(r"[^0-9]", "", s)
-        return f"{d[0]}.{d[1:]}" if len(d) == 4 else s
+    # Passo 4: Consolidar os dados num único dicionário
+    valor_total = df["Valor_Total_Entradas"].sum()
 
-    df["CFOP"] = df["CFOP"].map(fmt_cfop)
-    df["Valor_Total_Entradas"] = df["Valor_Total_Entradas"].map(lambda v: _limpar_valor_monetario(str(v)) if pd.notna(v) else None)
+    # Agrupa os dados por CFOP e UF para criar uma lista nos impostos
+    impostos_agrupados = {
+        "entradas_por_cfop": df.groupby("CFOP")["Valor_Total_Entradas"].sum().astype(str).to_dict(),
+        "entradas_por_uf": df.groupby("UF")["Valor_Total_Entradas"].sum().astype(str).to_dict(),
+    }
 
-    return df[["CNPJ", "Período", "Valor_Total_Entradas", "CFOP", "UF"]]
+    return {
+        "cnpj": cnpj_extraido,
+        "periodo": periodo_normalizado,
+        "valor_total_entradas": valor_total,
+        **impostos_agrupados
+    }
 def processar_nfe_xml(caminho_arquivo: Path) -> Dict[str, Any]:
     """Lê um ficheiro XML de NFe e extrai os dados fiscais."""
     try:
@@ -751,6 +840,8 @@ PROCESSADORES = {
     "MIT": processar_mit_pdf, # Nome da função que criámos
     "PGDAS": processar_pgdas_pdf,     # Nome da função que criámos
     "NFe": processar_nfe_xml,
+    "Relatório de Saídas": processar_relatorio_saidas,
+    "Relatório de Entradas": processar_relatorio_entradas,
     # As funções abaixo retornam DataFrames e precisam ser ajustadas para retornar dict
     # se quiseres que o salvamento automático funcione para elas.
     # "Relatório de Saídas": services_processamento.processar_relatorio_saidas,

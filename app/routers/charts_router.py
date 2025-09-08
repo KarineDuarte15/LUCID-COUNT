@@ -6,6 +6,10 @@ from datetime import date
 from typing import Optional
 import pandas as pd
 from collections import defaultdict # Importação necessária
+from app.crud import grafico as crud_grafico
+from app.crud import documento as crud_documento
+from pathlib import Path 
+
 
 from app.core.database import SessionLocal
 from app.services import charts as charts_service
@@ -241,4 +245,68 @@ def get_grafico_segregacao_tributos(
         raise HTTPException(status_code=404, detail="Dados de PGDAS não encontrados ou sem valores de tributos para gerar o gráfico de segregação.")
         
     caminho_grafico = charts_service.gerar_grafico_segregacao_tributos(dados_kpis["rosca"], cnpj)
+    return FileResponse(caminho_grafico, media_type="image/png")
+@router.get(
+    "/{documento_id}",
+    # response_model=List[GraficoResponse], # Idealmente, use um schema Pydantic
+    summary="Lista os gráficos associados a um documento"
+)
+def listar_graficos_por_documento(documento_id: int, db: Session = Depends(get_db)):
+    """
+    Retorna os metadados de todos os gráficos que foram gerados
+    a partir de um documento específico.
+    """
+    graficos = crud_grafico.get_graficos_por_documento_id(db, documento_id=documento_id)
+    if not graficos:
+        raise HTTPException(
+            status_code=404,
+            detail="Nenhum gráfico encontrado para o documento especificado."
+        )
+    return graficos
+
+
+@router.get("/faturamento", summary="Gera gráfico de Faturamento Mensal com tabela", response_class=FileResponse)
+def get_grafico_faturamento(
+    # ... os parâmetros cnpj, data_inicio, data_fim, db continuam os mesmos
+    cnpj: str = Query(..., description="CNPJ da empresa."),
+    data_inicio: date = Query(..., description="Data de início do período."),
+    data_fim: date = Query(..., description="Data de fim do período."),
+    db: Session = Depends(get_db)
+):
+    # Lógica de otimização
+    # 1. Obter o documento mais relevante (ex: PGDAS) para este período
+    # Esta lógica pode ser aprimorada, mas por enquanto, vamos pegar o primeiro PGDAS
+    dados_db_documentos = crud_dados_fiscais.obter_dados_por_periodo(
+        db, cnpj=cnpj, data_inicio=data_inicio, data_fim=data_fim, tipos_documento=['PGDAS']
+    )
+    if not dados_db_documentos:
+         raise HTTPException(status_code=404, detail="Dados de PGDAS não encontrados para gerar o gráfico.")
+    
+    documento_principal_id = dados_db_documentos[0].documento_id
+    
+    # 2. Verificar se um gráfico deste tipo já existe para este documento
+    grafico_existente = crud_grafico.get_grafico_por_tipo_e_documento(
+        db, tipo_grafico="faturamento", documento_id=documento_principal_id
+    )
+
+    if grafico_existente and Path(grafico_existente.caminho_arquivo).exists():
+        print(f"✅ Gráfico de faturamento encontrado no cache. Servindo arquivo: {grafico_existente.caminho_arquivo}")
+        return FileResponse(grafico_existente.caminho_arquivo, media_type="image/png")
+
+    # --- Se não existe, gera um novo ---
+    print("⏳ Gráfico não encontrado no cache. Gerando um novo...")
+    df_dados = preparar_dados_para_graficos(db, cnpj, data_inicio, data_fim)
+    if df_dados is None or df_dados.empty:
+        raise HTTPException(status_code=404, detail="Dados insuficientes para gerar o gráfico.")
+    
+    caminho_grafico = charts_service.gerar_grafico_faturamento(df_dados, cnpj)
+    
+    # 3. Salvar o novo gráfico no banco de dados
+    crud_grafico.criar_grafico(
+        db=db,
+        tipo_grafico="faturamento",
+        caminho_arquivo=caminho_grafico,
+        documento_id=documento_principal_id
+    )
+    
     return FileResponse(caminho_grafico, media_type="image/png")

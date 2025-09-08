@@ -9,6 +9,7 @@ from app.core.database import engine, Base
 from app.models.empresa import Empresa
 from app.models.documento import Documento
 from app.models.dados_fiscais import DadosFiscais
+from app.models.grafico import Grafico # <-- ADICIONADO AQUI
 
 def create_database_tables():
     """
@@ -40,7 +41,7 @@ def create_database_tables():
         print("✅ Tabelas antigas apagadas com sucesso.")
 
         # --- Criação das tabelas ---
-        print("\nA criar novas tabelas (Empresas, Documentos, Dados Fiscais)...")
+        print("\nA criar novas tabelas (Empresas, Documentos, Dados Fiscais, Graficos)...") # <-- Texto atualizado
         Base.metadata.create_all(bind=engine)
         print("✅ Tabelas relacionadas criadas com sucesso!")
         print("Pode agora executar o script 'adicionar_empresa.py' para popular os dados de teste.")

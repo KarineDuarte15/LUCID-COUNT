@@ -9,10 +9,9 @@ class Documento(Base):
     __tablename__ = "documentos"
 
     id = Column(Integer, primary_key=True, index=True)
-    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=True) 
     empresa = relationship("Empresa")
-    
-    # MUDANÇA: Renomear e adicionar colunas
+
     nome_arquivo_original = Column(String, nullable=False)
     nome_arquivo_unico = Column(String, nullable=False, unique=True) # Nome salvo em disco
     
@@ -20,3 +19,12 @@ class Documento(Base):
     caminho_arquivo = Column(String, nullable=False)
     data_upload = Column(DateTime(timezone=True), server_default=func.now())
     tipo_documento = Column(String, nullable=False, index=True)
+        # Relação para acessar os gráficos associados a este documento  
+   
+    dados_fiscais = relationship(
+        "DadosFiscais", 
+        back_populates="documento", 
+        cascade="all, delete-orphan",
+        uselist=False # Assumindo que um documento tem apenas um registo de dados fiscais
+    )
+    graficos = relationship("Grafico", back_populates="documento", cascade="all, delete-orphan")

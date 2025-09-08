@@ -3,6 +3,8 @@
 from sqlalchemy.orm import Session
 from app.schemas.documento import DocumentoCreate
 from app.models.documento import Documento
+import os
+from pathlib import Path
 def obter_documento_por_id(db: Session, documento_id: int):
     return db.query(Documento).filter(Documento.id == documento_id).first() 
 
@@ -63,3 +65,30 @@ def criar_novo_documento(db: Session, documento: DocumentoCreate, empresa_id: in
     db.refresh(db_documento)
     
     return db_documento
+def apagar_documento_por_id(db: Session, documento_id: int) -> Documento | None:
+    """
+    Encontra um documento pelo ID, apaga o seu ficheiro físico e remove o registo
+    do banco de dados. A remoção em cascata apaga os dados fiscais e gráficos.
+    """
+    db_documento = db.query(Documento).filter(Documento.id == documento_id).first()
+    
+    if not db_documento:
+        return None
+
+    # Apaga o ficheiro físico do servidor
+    caminho_arquivo = Path(db_documento.caminho_arquivo)
+    if caminho_arquivo.exists():
+        os.remove(caminho_arquivo)
+
+    # Apaga o registo do documento. A base de dados irá apagar os registos
+    # dependentes em 'dados_fiscais' e 'graficos' automaticamente.
+    db.delete(db_documento)
+    db.commit()
+    
+    return db_documento
+def associar_documentos_a_empresa(db: Session, empresa_id: int, documentos_ids: list[int]):
+    """Atualiza o empresa_id de uma lista de documentos."""
+    db.query(Documento).filter(Documento.id.in_(documentos_ids)).update(
+        {"empresa_id": empresa_id}, synchronize_session=False
+    )
+    db.commit()

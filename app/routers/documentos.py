@@ -8,7 +8,7 @@ from typing import Dict, Any, List
 import pandas as pd
 import pdfplumber
 import xmltodict
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Body
 from sqlalchemy.orm import Session
 from app.crud import dados_fiscais as crud_dados_fiscais
 from app.schemas import dados_fiscais as schemas_dados_fiscais
@@ -52,6 +52,24 @@ def listar_documentos(
     """
     documentos = crud_documento.obter_documentos(db, skip=skip, limit=limit)
     return documentos
+
+@router.delete(
+    "/{documento_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Apaga um documento pelo seu ID"
+)
+def apagar_documento(documento_id: int, db: Session = Depends(get_db)):
+    """
+    Apaga um documento e todos os seus dados associados, incluindo o ficheiro físico.
+    """
+    documento_apagado = crud_documento.apagar_documento_por_id(db, documento_id=documento_id)
+    
+    if not documento_apagado:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Documento com o ID {documento_id} não foi encontrado."
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @router.post(
     "/{documento_id}/processar",
@@ -111,3 +129,30 @@ def processar_documento_por_id(documento_id: int, db: Session = Depends(get_db))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Erro interno durante o processamento do ficheiro: {str(e)}")
+
+@router.put(
+    "/{documento_id}/dados",
+    response_model=schemas_dados_fiscais.DadosFiscais,
+    summary="Atualiza os dados fiscais de um documento"
+)
+def atualizar_dados_documento(
+    documento_id: int,
+    dados_validados: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Recebe os dados extraídos (potencialmente editados pelo utilizador)
+    e os salva ou atualiza na tabela de dados fiscais.
+    """
+    db_documento = crud_documento.obter_documento_por_id(db, documento_id=documento_id)
+    if not db_documento:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+
+    # A função salvar_dados_fiscais agora lida com a criação ou atualização
+    dados_fiscais_salvos = crud_dados_fiscais.salvar_dados_fiscais(
+        db=db,
+        documento_id=documento_id,
+        dados_extraidos=dados_validados
+    )
+    
+    return dados_fiscais_salvos

@@ -49,3 +49,12 @@ GRUPOS_POR_REGIME = {
         TipoDocumento.RELATORIO_ENTRADAS
     ]
 }
+
+# Em: app/schemas/tipos.py (exemplo)
+class TipoGrafico(str, Enum):
+    FATURAMENTO = "faturamento"
+    IMPOSTOS_CARGA = "impostos_carga"
+    SEGREGACAO_TRIBUTOS = "segregacao_tributos"
+    CRESCIMENTO_MENSAL = "crescimento_mensal"
+    LIMITE_FATURAMENTO = "limite_faturamento"
+    SUBLIMITE_RECEITA = "sublimite_receita" 

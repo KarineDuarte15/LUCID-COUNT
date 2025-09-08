@@ -14,8 +14,7 @@ class DadosFiscais(Base):
     documento_id = Column(Integer, ForeignKey("documentos.id"), nullable=False, unique=True)
     
     # Relação para podermos aceder ao documento a partir daqui (ex: dados.documento)
-    documento = relationship("Documento")
-
+    documento = relationship("Documento", back_populates="dados_fiscais")
     tipo_dado = Column(String, index=True) # Ex: "pdf_extracao"
     cnpj = Column(String, index=True)
     
