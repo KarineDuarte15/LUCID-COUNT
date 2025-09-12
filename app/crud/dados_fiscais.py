@@ -17,7 +17,8 @@ def _unificar_e_mapear_dados(dados_extraidos: dict) -> dict:
     """
     valor_total = dados_extraidos.get('receita_bruta_pa') or \
                   dados_extraidos.get('valor_total') or \
-                  dados_extraidos.get('valor_total_entradas')
+                  dados_extraidos.get('valor_total_entradas') or \
+                  Decimal("0.00")
 
     data_competencia = None
     periodo_str = dados_extraidos.get("periodo")

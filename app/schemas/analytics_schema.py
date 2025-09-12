@@ -15,7 +15,7 @@ class KpiResponse(BaseModel):
     
     # Resultados dos KPIs
 
-    carga_tributaria_percentual: str | None # De Decimal para str
+    carga_tributaria_percentual: Dict[str, str] | None # De str para Dict[str, str]
     ticket_medio: str | None                 # De Decimal para str
     crescimento_faturamento_percentual: str | None # De Decimal para str também, para consistência
     total_impostos_por_tipo: Dict[str, Any] 

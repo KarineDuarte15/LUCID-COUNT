@@ -149,6 +149,8 @@ def preparar_dados_para_kpis_visuais(db: Session, cnpj: str, data_inicio: date, 
     }
 
 # --- ENDPOINTS ---
+# ✅ CORREÇÃO: Removida a primeira definição duplicada de get_grafico_faturamento
+# A função correta, com a lógica de cache, é mantida.
 @router.get("/faturamento", summary="Gera gráfico de Faturamento Mensal com tabela", response_class=FileResponse)
 def get_grafico_faturamento(
     cnpj: str = Query(..., description="CNPJ da empresa.", example="20.295.854/0001-50"),
@@ -156,12 +158,38 @@ def get_grafico_faturamento(
     data_fim: date = Query(..., description="Data de fim do período (YYYY-MM-DD)."),
     db: Session = Depends(get_db)
 ):
+    dados_db_documentos = crud_dados_fiscais.obter_dados_por_periodo(
+        db, cnpj=cnpj, data_inicio=data_inicio, data_fim=data_fim, tipos_documento=['PGDAS']
+    )
+    if not dados_db_documentos:
+         raise HTTPException(status_code=404, detail="Dados de PGDAS não encontrados para gerar o gráfico.")
+    
+    documento_principal_id = dados_db_documentos[0].documento_id
+    
+    grafico_existente = crud_grafico.get_grafico_por_tipo_e_documento(
+        db, tipo_grafico="faturamento", documento_id=documento_principal_id
+    )
+
+    if grafico_existente and Path(grafico_existente.caminho_arquivo).exists():
+        print(f"✅ Gráfico de faturamento encontrado no cache. Servindo arquivo: {grafico_existente.caminho_arquivo}")
+        return FileResponse(grafico_existente.caminho_arquivo, media_type="image/png")
+
+    print("⏳ Gráfico não encontrado no cache. Gerando um novo...")
     df_dados = preparar_dados_para_graficos(db, cnpj, data_inicio, data_fim)
     if df_dados is None or df_dados.empty:
-        raise HTTPException(status_code=404, detail="Dados insuficientes para gerar o gráfico de faturamento.")
+        raise HTTPException(status_code=404, detail="Dados insuficientes para gerar o gráfico.")
     
     caminho_grafico = charts_service.gerar_grafico_faturamento(df_dados, cnpj)
+    
+    crud_grafico.criar_grafico(
+        db=db,
+        tipo_grafico="faturamento",
+        caminho_arquivo=caminho_grafico,
+        documento_id=documento_principal_id
+    )
+    
     return FileResponse(caminho_grafico, media_type="image/png")
+
 
 @router.get("/receita-crescimento", summary="Gera gráfico de Receita Bruta vs Taxa de Crescimento", response_class=FileResponse)
 def get_grafico_receita_crescimento(

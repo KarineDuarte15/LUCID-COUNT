@@ -63,13 +63,9 @@ async def upload_e_registar_multiplos_ficheiros(
     """
     UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
     empresa = crud_empresa.get_empresa_por_cnpj(db, cnpj=cnpj)
-    if not empresa:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Nenhuma empresa encontrada com o CNPJ {cnpj}. Por favor, cadastre a empresa primeiro."
-        )
-    documentos_criados = []
+    empresa_id = empresa.id if empresa else None # O ID da empresa pode ser nulo
 
+    documentos_criados = []
     for file in files:
         # Validações de tipo e tamanho (código existente)
          # --- CORREÇÃO: Validação no nível correto do loop ---

@@ -139,6 +139,10 @@ def _get_faturamento_e_impostos_por_regime(registos: list, regime: str) -> Tuple
 #        FUNÇÕES PRINCIPAIS PARA CÁLCULO DAS KPIs
 # -----------------------------------------------------------------
 
+#-----------------------------------------------------------------  
+# Função para calcular a carga tributária
+#-----------------------------------------------------------------
+
 def calcular_carga_tributaria(db: Session, *, cnpj: str, regime: str, data_inicio: date, data_fim: date) -> Decimal | None:
     registos = _get_documentos_relevantes(db, cnpj=cnpj, regime=regime, data_inicio=data_inicio, data_fim=data_fim)
     faturamento_total, total_impostos, _ = _get_faturamento_e_impostos_por_regime(registos, regime)
@@ -182,7 +186,7 @@ def calcular_crescimento_faturamento(db: Session, *, cnpj: str, regime: str, dat
     
     faturamento_anterior = _get_faturamento_do_periodo(data_inicio_anterior, data_fim_anterior)
     if faturamento_anterior is None or faturamento_anterior == 0:
-        return None
+        return Decimal("0.00")
 
     crescimento = ((faturamento_atual - faturamento_anterior) / faturamento_anterior) * 100
     return crescimento.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -376,6 +380,173 @@ def gerar_relatorio_simples_nacional(db: Session, *, cnpj: str, data_competencia
         "Ticket Médio": _formatar_monetario(ticket_medio),
         "Segregação dos Tributos": segregacao_tributos,
         # Adicione os outros grupos de KPIs (Acumulados, Limites, Variações) aqui quando a lógica estiver pronta.
+    }
+
+    return relatorio
+
+#-----------------------------------------------------------------
+# Função para projetar a carga tributária para os próximos 3 meses  
+#-----------------------------------------------------------------
+
+def projetar_carga_tributaria(db: Session, *, cnpj: str, regime: str, data_inicio: date, data_fim: date) -> Dict[str, str]:
+    """
+    Calcula a carga tributária atual e projeta para os próximos 3 meses,
+    adicionando o IRPJ ao faturamento de cada mês projetado.
+    """
+    registos = _get_documentos_relevantes(db, cnpj=cnpj, regime=regime, data_inicio=data_inicio, data_fim=data_fim)
+    faturamento_total, total_impostos, _ = _get_faturamento_e_impostos_por_regime(registos, regime)
+
+    # Encontra o valor do IRPJ nos impostos do período
+    irpj = Decimal(0)
+    for reg in registos:
+        if reg.impostos:
+            valor_irpj_str = reg.impostos.get('irpj')
+            if valor_irpj_str:
+                irpj += _converter_valor(valor_irpj_str) or Decimal(0)
+    
+    # Se o faturamento for zero, não há como projetar
+    if faturamento_total == 0:
+        return {"Mes_Atual": "0.00%"}
+
+    # Projeção
+    projecao = {}
+    faturamento_projetado = faturamento_total
+    
+    # Mês Atual
+    carga_atual = (total_impostos / faturamento_total) * 100
+    projecao["Mes_Atual"] = _formatar_percentual(carga_atual)
+
+    # Próximos 3 meses
+    for i in range(1, 4):
+        # A cada mês, o faturamento acumulado aumenta pelo valor do IRPJ pago
+        faturamento_projetado += irpj
+        carga_projetada = (total_impostos / faturamento_projetado) * 100
+        projecao[f"Mes_{i}"] = _formatar_percentual(carga_projetada)
+
+    return projecao
+
+
+#_-----------------------------------------------------------------
+# KPIs para gerar relatório analítico completo do Lucro Presumido Serviços
+#-----------------------------------------------------------------
+def calcular_peso_entradas_sobre_receita(db: Session, *, cnpj: str, regime: str, data_inicio: date, data_fim: date) -> Decimal | None:
+    """
+    Calcula o peso das entradas sobre a receita/faturamento total do período.
+    Fórmula: PEnt = Entradas / Receita/Faturamento
+    """
+    registos = _get_documentos_relevantes(db, cnpj=cnpj, regime=regime, data_inicio=data_inicio, data_fim=data_fim)
+    
+    faturamento_total, _, _ = _get_faturamento_e_impostos_por_regime(registos, regime)
+    
+    entradas_reg = next((reg for reg in registos if reg.documento.tipo_documento == 'Relatório de Entradas'), None)
+    
+    if not entradas_reg or faturamento_total == 0:
+        return Decimal(0)
+        
+    total_entradas = entradas_reg.valor_total or Decimal(0)
+    
+    peso_entradas = (total_entradas / faturamento_total) * 100
+    return peso_entradas.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+def calcular_variacao_tributos_mensal(db: Session, *, cnpj: str, regime: str, data_inicio_atual: date, data_fim_atual: date) -> Decimal | None:
+    """
+    Calcula a variação percentual do total de tributos em relação ao mês anterior.
+    Fórmula: VaT = (Tributos Mês Atual / Tributos Mês Anterior) - 1
+    """
+    def _get_tributos_do_periodo(data_inicio, data_fim):
+        registos = _get_documentos_relevantes(db, cnpj=cnpj, regime=regime, data_inicio=data_inicio, data_fim=data_fim)
+        _, total_tributos, _ = _get_faturamento_e_impostos_por_regime(registos, regime)
+        return total_tributos
+
+    tributos_atuais = _get_tributos_do_periodo(data_inicio_atual, data_fim_atual)
+
+    # Calcula o período anterior
+    data_fim_anterior = data_inicio_atual - timedelta(days=1)
+    data_inicio_anterior = data_fim_anterior.replace(day=1)
+    
+    tributos_anteriores = _get_tributos_do_periodo(data_inicio_anterior, data_fim_anterior)
+
+    if tributos_anteriores is None or tributos_anteriores == 0:
+        return None # Evita divisão por zero e retorna None se não houver dados anteriores
+
+    variacao = ((tributos_atuais / tributos_anteriores) - 1) * 100
+    return variacao.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+def calcular_faturamento_no_exercicio(db: Session, *, cnpj: str, regime: str, data_inicio: date, data_fim: date) -> Decimal:
+    """
+    Soma o faturamento total do início do ano fiscal até a data_fim.
+    """
+    ano_corrente = data_fim.year
+    inicio_ano = date(ano_corrente, 1, 1)
+    
+    registos = _get_documentos_relevantes(db, cnpj=cnpj, regime=regime, data_inicio=inicio_ano, data_fim=data_fim)
+    faturamento_total, _, _ = _get_faturamento_e_impostos_por_regime(registos, regime)
+    
+    return faturamento_total
+
+def calcular_limite_faturamento_lp(faturamento_exercicio: Decimal) -> Decimal:
+    """
+    Calcula o percentual de uso do limite de faturamento para Lucro Presumido.
+    Fórmula: Faturamento no Exercício / 78.000.000,00
+    """
+    limite = Decimal("78000000.00")
+    if faturamento_exercicio is None or faturamento_exercicio == 0:
+        return Decimal(0)
+    
+    percentual_uso = (faturamento_exercicio / limite) * 100
+    return percentual_uso.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+#-----------------------------------------------------------------
+# KPIs para gerar relatório analítico completo do Lucro Presumido serviços
+#-----------------------------------------------------------------
+def gerar_relatorio_lucro_presumido_servicos(db: Session, *, cnpj: str, data_competencia: date) -> Dict[str, Any]:
+    """
+    Gera um relatório analítico completo para o regime Lucro Presumido - Serviços.
+    """
+    regime = "Lucro Presumido (Serviços)"
+    
+    # --- 1. DEFINIR PERÍODOS ---
+    data_inicio_atual = data_competencia.replace(day=1)
+    proximo_mes_primeiro_dia = (data_inicio_atual.replace(day=28) + timedelta(days=4)).replace(day=1)
+    data_fim_atual = proximo_mes_primeiro_dia - timedelta(days=1)
+
+    # --- 2. CÁLCULO DOS KPIs ---
+    
+    # KPIs Mensais
+    crescimento_receita = calcular_crescimento_faturamento(
+        db, cnpj=cnpj, regime=regime, data_inicio_atual=data_inicio_atual, data_fim_atual=data_fim_atual
+    )
+    carga_tributaria = calcular_carga_tributaria(
+        db, cnpj=cnpj, regime=regime, data_inicio=data_inicio_atual, data_fim=data_fim_atual
+    )
+    peso_entradas = calcular_peso_entradas_sobre_receita(
+        db, cnpj=cnpj, regime=regime, data_inicio=data_inicio_atual, data_fim=data_fim_atual
+    )
+    variacao_tributos = calcular_variacao_tributos_mensal(
+        db, cnpj=cnpj, regime=regime, data_inicio_atual=data_inicio_atual, data_fim_atual=data_fim_atual
+    )
+    impostos_por_tipo = calcular_impostos_por_tipo(
+        db, cnpj=cnpj, regime=regime, data_inicio=data_inicio_atual, data_fim=data_fim_atual
+    )
+
+    # KPIs Anuais/Exercício
+    faturamento_exercicio = calcular_faturamento_no_exercicio(
+        db, cnpj=cnpj, regime=regime, data_inicio=data_inicio_atual, data_fim=data_fim_atual
+    )
+    limite_faturamento_percentual = calcular_limite_faturamento_lp(faturamento_exercicio)
+
+    # --- 3. MONTAGEM DO RELATÓRIO ---
+    relatorio = {
+        "Taxa de Crescimento da Receita (Mês)": _formatar_percentual(crescimento_receita),
+        "Carga Tributária (Mês)": _formatar_percentual(carga_tributaria),
+        "Peso das Entradas sobre a Receita (Mês)": _formatar_percentual(peso_entradas),
+        "Variação dos Tributos (Mês)": _formatar_percentual(variacao_tributos),
+        "Total de Faturamento no Período (Exercício)": _formatar_monetario(faturamento_exercicio),
+        "Segregação dos Tributos (Mês)": impostos_por_tipo,
+        "Limite de Faturamento (Exercício)": {
+            "Valor Acumulado": _formatar_monetario(faturamento_exercicio),
+            "Percentual Atingido": _formatar_percentual(limite_faturamento_percentual)
+        }
     }
 
     return relatorio

@@ -88,50 +88,49 @@ def _extrair_int(pattern: str, texto: str) -> Optional[int]:
 def _normalizar_periodo_mm_aaaa(raw: Optional[str]) -> Optional[str]:
     """
     Aceita vários formatos de data, incluindo "DD/MM/AAAA até DD/MM/AAAA",
-    e tenta sempre retornar o formato MM/AAAA.
+    "Mês de AAAA", e tenta sempre retornar o formato MM/AAAA.
     """
     if not raw:
         return None
-    s = raw.strip()
+    s = raw.strip().lower() # Converte para minúsculas para facilitar a correspondência
 
-    # --- NOVA LÓGICA ---
-    # Primeiro, procura por um padrão de data completo como "01/07/2025" no início da string.
-    # Este padrão é mais específico e irá capturar corretamente o mês e o ano.
-    # Padrão: (DD) / (MM) / (AAAA)
+    # Dicionário de meses para conversão
+    meses = {
+        "janeiro": "01", "fevereiro": "02", "março": "03", "marco": "03", "abril": "04",
+        "maio": "05", "junho": "06", "julho": "07", "agosto": "08", "setembro": "09",
+        "outubro": "10", "novembro": "11", "dezembro": "12",
+    }
+
+    # --- NOVA LÓGICA MELHORADA ---
+    # Tenta encontrar o padrão "Mês de AAAA"
+    match_mes_de_ano = re.search(r"([a-zç]+)\s+de\s+(\d{4})", s)
+    if match_mes_de_ano:
+        nome_mes = match_mes_de_ano.group(1)
+        ano = match_mes_de_ano.group(2)
+        mes_num = meses.get(nome_mes)
+        if mes_num:
+            return f"{mes_num}/{ano}"
+
+    # Lógica anterior mantida como fallback para outros formatos
     match_intervalo = re.search(r"^\s*\d{2}\s*/\s*(0?[1-9]|1[0-2])\s*/\s*(\d{4})", s)
     if match_intervalo:
         mm = match_intervalo.group(1).zfill(2)
         aaaa = match_intervalo.group(2)
         return f"{mm}/{aaaa}"
 
-    # --- LÓGICA ANTERIOR MANTIDA COMO FALLBACK ---
-    # MM/AAAA
     m = re.search(r"(0?[1-9]|1[0-2])\s*[/.-]\s*(\d{4})", s)
     if m:
         mm = m.group(1).zfill(2)
         aaaa = m.group(2)
         return f"{mm}/{aaaa}"
         
-    # AAAA-MM
     m = re.search(r"(\d{4})\s*[-/.]\s*(0?[1-9]|1[0-2])", s)
     if m:
         aaaa = m.group(1)
         mm = m.group(2).zfill(2)
         return f"{mm}/{aaaa}"
-        
-    # Nome do mês/AAAA (básico)
-    meses = {
-        "janeiro": "01", "fevereiro": "02", "março": "03", "marco": "03", "abril": "04",
-        "maio": "05", "junho": "06", "julho": "07", "agosto": "08", "setembro": "09",
-        "outubro": "10", "novembro": "11", "dezembro": "12",
-    }
-    m = re.search(r"([A-Za-zçÇãõáéíóúÁÉÍÓÚ]+)\s*[/.-]\s*(\d{4})", s, re.IGNORECASE)
-    if m:
-        mm = meses.get(m.group(1).lower())
-        if mm:
-            return f"{mm}/{m.group(2)}"
 
-    return None  # Retorna None se nenhum formato for reconhecido
+    return None
 
 
 # --- Funções Auxiliares para Extração ---
@@ -264,7 +263,7 @@ def processar_iss_pdf(caminho_arquivo: Path) -> Dict[str, Any]:
 
     dados: Dict[str, Any] = {
         "cnpj": _extrair_por_regex(r"CNPJ\s*:?\s*([\d./-]+)", texto),
-        "periodo": _normalizar_periodo_mm_aaaa(_extrair_por_regex(r"Compet[êe]ncia\s*:\s*([A-Za-z]+\s+de\s+\d{4})", texto)),        
+        "periodo": _normalizar_periodo_mm_aaaa(_extrair_por_regex(r"Compet[êe]ncia\s*:\s*([\wçÇãõáéíóúÁÉÍÓÚ]+\s+de\s+\d{4})", texto)),        
         "valor_total": _extrair_valor(r"Serviços\s+Prestados[\s\S]*?Somatório\s+[\d.]+\s+([\d.,]+)", texto),
         "qtd_nfse_emitidas": _extrair_int(r"Serviços\s+Prestados[\s\S]*?Somatório\s+([\d.]+)", texto),
         "iss_devido": _extrair_valor(r"ISS\s+Próprio[\s\d.,]+?([\d.,]+)\s*$", texto),
@@ -649,9 +648,6 @@ def processar_relatorio_saidas(caminho_arquivo: Path, cfops_nao_incidentes: Opti
     return df[["CNPJ", "Período", "Faturamento", "CFOP", "Incide_Faturamento", "UF"]]
 
 
-# Em: app/services/processamento.py
-# ... (mantenha as outras importações e funções como estão)
-
 def processar_relatorio_entradas(caminho_arquivo: Path) -> Dict[str, Any]:
     """
     Lê relatório de entradas, extrai CNPJ e Período do cabeçalho do PDF,
@@ -665,40 +661,65 @@ def processar_relatorio_entradas(caminho_arquivo: Path) -> Dict[str, Any]:
     cnpj_extraido = _extrair_por_regex(r"CNP\w*:\s*([\d./-]+)", texto_completo)
     
     # Regex para o Período, buscando pela palavra "Periodo:"
-    periodo_extraido = _extrair_por_regex(r"Periodo:\s*([\d/]+\s+at[eé]\s+[\d/]+)", texto_completo)
+    periodo_extraido = _extrair_por_regex(r"Per[ií]odo:\s*(\d{1,2}/\d{1,2}/\d{4})", texto_completo)
     periodo_normalizado = _normalizar_periodo_mm_aaaa(periodo_extraido)
+
+    # <<< INÍCIO DO CÓDIGO DE DEPURAÇÃO >>>
+    print("\n--- DEBUG: processar_relatorio_entradas ---")
+    print(f"Ficheiro: {caminho_arquivo.name}")
+    print(f"Texto extraído (primeiros 200 caracteres): {texto_completo[:200].replace('\n', ' ')}")
+    print(f"Valor bruto extraído para 'período' (periodo_extraido): {periodo_extraido}")
+    print(f"Valor após normalização (periodo_normalizado): {periodo_normalizado}")
+    print("-----------------------------------------\n")
+    # <<< FIM DO CÓDIGO DE DEPURAÇÃO >>>
+
+
 
     # Passo 3: Ler os dados da tabela do arquivo (PDF, CSV, etc.)
     df = _ler_tabela_arquivo(caminho_arquivo)
     df = _normalizar_colunas_mov(df)
 
-    # Garante que as colunas essenciais existam
-    for col in ["Valor_Total_Entradas", "CFOP", "UF"]:
-        if col not in df.columns:
-            if col == "Valor_Total_Entradas" and "Valor" in df.columns:
-                df = df.rename(columns={"Valor": col})
-            else:
-                df[col] = None
-
-    # Converte os valores monetários para Decimal
-    df["Valor_Total_Entradas"] = df["Valor_Total_Entradas"].apply(
-        lambda v: _limpar_valor_monetario(str(v)) if pd.notna(v) else None
+    # 2. Nova Regex, mais precisa, para encontrar as linhas da tabela
+    # Procura por um padrão que começa com um código de 4 dígitos (Código), seguido por datas,
+    # até encontrar o CFOP (ex: 1-933), a UF (ex: CE) e o Valor Contábil (ex: 595,00)
+    linhas_tabela = re.findall(
+        r"^\d{4}\s+\d{2}/\d{2}/\d{4}.*?\s+(\d\-\d{3})\s+.*?([A-Z]{2})\s+([\d.,]+)",
+        texto_completo,
+        re.MULTILINE
     )
 
-    # Passo 4: Consolidar os dados num único dicionário
+    registros = []
+    for cfop, uf, valor_str in linhas_tabela:
+        valor_decimal = _converter_valor(valor_str)
+        if valor_decimal is not None:
+            registros.append({
+                "CFOP": cfop.replace("-", "."),
+                "UF": uf.strip(),
+                "Valor_Total_Entradas": valor_decimal
+            })
+
+    if not registros:
+        return {
+            "cnpj": cnpj_extraido, "periodo": periodo_normalizado,
+            "valor_total_entradas": Decimal("0.00"),
+            "entradas_por_cfop": {}, "entradas_por_uf": {}
+        }
+    
+    # 3. Usa o Pandas para agregar os dados facilmente
+    df = pd.DataFrame(registros)
     valor_total = df["Valor_Total_Entradas"].sum()
 
-    # Agrupa os dados por CFOP e UF para criar uma lista nos impostos
-    impostos_agrupados = {
-        "entradas_por_cfop": df.groupby("CFOP")["Valor_Total_Entradas"].sum().astype(str).to_dict(),
-        "entradas_por_uf": df.groupby("UF")["Valor_Total_Entradas"].sum().astype(str).to_dict(),
+    # 4. Cria os dicionários detalhados para o JSON de impostos
+    dados_agregados = {
+        "entradas_por_cfop": df.groupby("CFOP")["Valor_Total_Entradas"].sum().to_dict(),
+        "entradas_por_uf": df.groupby("UF")["Valor_Total_Entradas"].sum().to_dict(),
     }
 
     return {
         "cnpj": cnpj_extraido,
         "periodo": periodo_normalizado,
         "valor_total_entradas": valor_total,
-        **impostos_agrupados
+        **dados_agregados
     }
 def processar_nfe_xml(caminho_arquivo: Path) -> Dict[str, Any]:
     """Lê um ficheiro XML de NFe e extrai os dados fiscais."""
