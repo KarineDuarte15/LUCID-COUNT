@@ -1,22 +1,37 @@
 # app/models/empresa.py
 
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, Boolean, JSON
 from app.core.database import Base
 
 class Empresa(Base):
-    """
-    Modelo SQLAlchemy para a tabela de empresas.
-    
-    Esta classe define a estrutura da tabela 'empresas' na base de dados.
-    Será a tabela central para associar todos os outros dados.
-    """
     __tablename__ = "empresas"
 
-    # id: Chave primária, um número inteiro que se auto-incrementa.
     id = Column(Integer, primary_key=True, index=True)
     
-    # cnpj: O CNPJ da empresa, formatado. Será único para evitar duplicados.
+    # --- Campos Principais ---
     cnpj = Column(String, unique=True, index=True, nullable=False)
-    
-    # regime_tributario: O regime tributário da empresa (ex: "Simples Nacional").
     regime_tributario = Column(String, nullable=False)
+    razao_social = Column(String, nullable=True)
+    nome_fantasia = Column(String, nullable=True)
+    ativa = Column(Boolean, default=True)
+
+    # --- Endereço e Contato (armazenados como JSON) ---
+    endereco = Column(JSON, nullable=True)
+    # Exemplo: {"logradouro": "Av...", "numero": "123", "cep": "60000-000", ...}
+    
+    fones = Column(JSON, nullable=True) # Para armazenar uma lista de telefones
+    website = Column(String, nullable=True)
+    
+    # --- Dados Fiscais e de Registro ---
+    inscricao_municipal = Column(String, nullable=True)
+    inscricoes_estaduais = Column(JSON, nullable=True) 
+    # Exemplo: [{"inscricao": "12345", "data": "2024-01-01", "uf": "CE"}]
+    
+    nire = Column(String, nullable=True)
+    outros_identificadores = Column(JSON, nullable=True)
+
+    # --- Outras Informações ---
+    grupo_empresas = Column(String, nullable=True)
+    apelido_continuo = Column(String, nullable=True)
+    contatos = Column(JSON, nullable=True)
+    # Exemplo: [{"nome": "Fulano", "cargo": "CEO", "celular": "8599999...", "email": "..."}]

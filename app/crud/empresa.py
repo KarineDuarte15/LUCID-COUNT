@@ -1,25 +1,20 @@
 # app/crud/empresa.py
-
 from sqlalchemy.orm import Session
-from app.models.empresa import Empresa
-from app.schemas.tipos import RegimeTributario # Usamos o Enum para consistência
+from app.models import empresa as models
+from app.schemas import empresa as schemas
 
-def get_empresa_por_cnpj(db: Session, cnpj: str) -> Empresa | None:
-    """Procura e retorna uma empresa pelo seu CNPJ."""
-    return db.query(Empresa).filter(Empresa.cnpj == cnpj).first()
+def get_empresa_por_cnpj(db: Session, cnpj: str) -> models.Empresa | None:
+    return db.query(models.Empresa).filter(models.Empresa.cnpj == cnpj).first()
 
-def get_todas_empresas(db: Session) -> list[Empresa]:
-    """Retorna uma lista de todas as empresas cadastradas."""
-    return db.query(Empresa).all()
+def get_todas_empresas(db: Session) -> list[models.Empresa]:
+    return db.query(models.Empresa).all()
 
-def criar_empresa(db: Session, cnpj: str, regime: RegimeTributario) -> Empresa:
-    """Cria um novo registo de empresa na base de dados."""
-    
-    # Cria uma instância do modelo SQLAlchemy
-    db_empresa = Empresa(
-        cnpj=cnpj,
-        regime_tributario=regime.value # Usamos .value para guardar a string
-    )
+def criar_empresa(db: Session, empresa: schemas.EmpresaCreate) -> models.Empresa:
+    """
+    Cria um novo registo de empresa na base de dados a partir de um schema Pydantic.
+    """
+    # Converte o schema Pydantic para um dicionário e cria o modelo SQLAlchemy
+    db_empresa = models.Empresa(**empresa.model_dump())
     
     db.add(db_empresa)
     db.commit()

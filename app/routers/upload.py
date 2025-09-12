@@ -9,7 +9,8 @@ from typing import Annotated, List
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 from app.services.processamento import PROCESSADORES
-from app.schemas.tipos import TipoDocumento
+from app.schemas.tipos import RegimeTributario
+from app.schemas.tipos import TipoDocumento, TipoDocumento
 
 # Importações da nossa aplicação
 from app.core.database import SessionLocal
@@ -54,6 +55,7 @@ def get_db():
 async def upload_e_registar_multiplos_ficheiros(
     # ALTERADO: Agora tipo_documento é do tipo Enum
     cnpj: Annotated[str, Form(description="CNPJ da empresa à qual os documentos pertencem.")],
+    regime: Annotated[RegimeTributario, Form(description="O regime tributário da empresa.")],
     tipo_documento: Annotated[TipoDocumento, Form(description="O tipo de documento fiscal.")],
     files: Annotated[List[UploadFile], File(description="Uma lista de ficheiros a serem enviados.")],
     db: Session = Depends(get_db)
@@ -63,8 +65,12 @@ async def upload_e_registar_multiplos_ficheiros(
     """
     UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
     empresa = crud_empresa.get_empresa_por_cnpj(db, cnpj=cnpj)
-    empresa_id = empresa.id if empresa else None # O ID da empresa pode ser nulo
-
+    if not empresa:
+        print(f"Empresa com CNPJ {cnpj} não encontrada. Criando novo registo...")
+        empresa = crud_empresa.criar_empresa(db=db, cnpj=cnpj, regime=regime)
+        print(f"✅ Empresa {cnpj} criada com o ID {empresa.id}.")
+    
+    empresa_id = empresa.id
     documentos_criados = []
     for file in files:
         # Validações de tipo e tamanho (código existente)
