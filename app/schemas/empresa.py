@@ -25,7 +25,7 @@ class ContatoSchema(BaseModel):
 
 # --- Schema Principal da Empresa ---
 class EmpresaBase(BaseModel):
-    cnpj: str = Field(..., example="54.811.719/0001-31")
+    cnpj: str = Field(..., example="12.811.719/0001-31")
     regime_tributario: str = Field(..., example="Simples Nacional")
     razao_social: Optional[str] = None
     nome_fantasia: Optional[str] = None
