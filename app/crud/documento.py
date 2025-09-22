@@ -21,19 +21,15 @@ def obter_documento_por_id(db: Session, documento_id: int) -> Documento | None:
     """
     return db.query(Documento).filter(Documento.id == documento_id).first()
 
-def obter_documentos(db: Session, skip: int = 0, limit: int = 100) -> list[Documento]:
+def obter_documentos(db: Session, skip: int = 0, limit: int = 100, empresa_id: int | None = None) -> list[Documento]:
     """
     Obtém uma lista de registos de documentos, com paginação.
-    
-    Args:
-        db: A sessão do banco de dados.
-        skip: O número de registos a saltar (para paginação).
-        limit: O número máximo de registos a retornar.
-        
-    Returns:
-        Uma lista de objetos SQLAlchemy de documentos.
+    Pode filtrar opcionalmente por empresa_id.
     """
-    return db.query(Documento).offset(skip).limit(limit).all()
+    query = db.query(Documento)
+    if empresa_id is not None:
+        query = query.filter(Documento.empresa_id == empresa_id)
+    return query.offset(skip).limit(limit).all()
 
 
 
@@ -92,3 +88,4 @@ def associar_documentos_a_empresa(db: Session, empresa_id: int, documentos_ids: 
         {"empresa_id": empresa_id}, synchronize_session=False
     )
     db.commit()
+

@@ -3,7 +3,7 @@ import traceback
 import re
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 import pandas as pd
 import pdfplumber
@@ -45,13 +45,15 @@ def get_db():
 def listar_documentos(
     skip: int = 0,
     limit: int = 100,
+    empresa_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
     """
     Obtém uma lista de todos os registos de documentos da base de dados.
     """
-    documentos = crud_documento.obter_documentos(db, skip=skip, limit=limit)
+    documentos = crud_documento.obter_documentos(db, skip=skip, limit=limit, empresa_id=empresa_id)
     return documentos
+
 
 @router.delete(
     "/{documento_id}",

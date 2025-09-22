@@ -3,7 +3,9 @@ from sqlalchemy.orm import Session
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from collections import defaultdict
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
+import pandas as pd
+
 
 # Importamos as nossas funções de CRUD
 from app.crud import dados_fiscais as crud_dados_fiscais
@@ -113,6 +115,9 @@ def _get_faturamento_e_impostos_por_regime(registos: list, regime: str) -> Tuple
         
         if iss_reg and iss_reg.impostos:
             numero_de_notas = int(iss_reg.impostos.get('qtd_nfse_emitidas', 0))
+
+
+
        
 # -----------------------------------------------------------------
 #--------------- Lógica para Lucro Presumido e Lucro Real----------
@@ -133,6 +138,46 @@ def _get_faturamento_e_impostos_por_regime(registos: list, regime: str) -> Tuple
         total_impostos = sum(impostos_agregados.values())
 
     return faturamento_total, total_impostos, numero_de_notas
+
+def preparar_dados_tributos_lp(db: Session, cnpj: str, data_inicio: date, data_fim: date) -> Optional[pd.DataFrame]:
+    registos = _get_documentos_relevantes(db, cnpj=cnpj, regime="Lucro Presumido (Serviços)", data_inicio=data_inicio, data_fim=data_fim)
+    if not registos:
+        return None
+
+    dados_mensais = defaultdict(lambda: {'Devido': Decimal(0), 'Retido': Decimal(0)})
+    
+    for reg in registos:
+        if reg.data_competencia and reg.impostos:
+            mes = reg.data_competencia.strftime('%Y-%m')
+            if reg.documento.tipo_documento == 'Encerramento ISS':
+                dados_mensais[mes]['Retido'] += _converter_valor(reg.impostos.get('iss_retido')) or Decimal(0)
+                dados_mensais[mes]['Devido'] += _converter_valor(reg.impostos.get('iss_devido')) or Decimal(0)
+            elif reg.documento.tipo_documento == 'MIT':
+                dados_mensais[mes]['Devido'] += _converter_valor(reg.impostos.get('csll')) or Decimal(0)
+                dados_mensais[mes]['Devido'] += _converter_valor(reg.impostos.get('irpj')) or Decimal(0)
+                dados_mensais[mes]['Devido'] += _converter_valor(reg.impostos.get('ipi')) or Decimal(0)
+
+    lista_para_df = []
+    for mes, valores in dados_mensais.items():
+        total_mes = valores['Devido'] + valores['Retido']
+        if total_mes > 0:
+            lista_para_df.append({
+                'Mês': mes,
+                'Tributo': 'Devido',
+                'Valor': valores['Devido'],
+                'Percentual': (valores['Devido'] / total_mes) * 100
+            })
+            lista_para_df.append({
+                'Mês': mes,
+                'Tributo': 'Retido',
+                'Valor': valores['Retido'],
+                'Percentual': (valores['Retido'] / total_mes) * 100
+            })
+
+    if not lista_para_df:
+        return None
+
+    return pd.DataFrame(lista_para_df)
 
 
 #------------------------------------ KPIs ------------------------------------ 
