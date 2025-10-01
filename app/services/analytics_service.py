@@ -595,3 +595,112 @@ def gerar_relatorio_lucro_presumido_servicos(db: Session, *, cnpj: str, data_com
     }
 
     return relatorio
+
+#-----------------------------------------------------------------
+# Funções para preparar dados para gráficos
+#-----------------------------------------------------------------
+
+def preparar_dados_para_graficos(db: Session, cnpj: str, data_inicio: date, data_fim: date) -> Optional[pd.DataFrame]:
+    """
+    Busca dados fiscais de PGDAS no período, calcula métricas e retorna um DataFrame.
+    """
+    # 1. Busca os dados relevantes (apenas PGDAS para estes gráficos)
+    registos = crud_dados_fiscais.obter_dados_por_periodo(
+        db,
+        cnpj=cnpj,
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+        tipos_documento=["PGDAS"]
+    )
+
+    if not registos:
+        return None
+
+    # 2. Extrai os dados para uma lista de dicionários
+    dados_grafico = []
+    for reg in registos:
+        impostos = reg.impostos or {}
+        dados_grafico.append({
+            'data_competencia': reg.data_competencia,
+            'faturamento': reg.valor_total or Decimal(0),
+            'total_impostos': _converter_valor(impostos.get("total_debitos_tributos")) or Decimal(0)
+        })
+
+    if not dados_grafico:
+        return None
+
+    # 3. Converte para DataFrame e ordena por data
+    df = pd.DataFrame(dados_grafico)
+    df = df.sort_values(by='data_competencia').reset_index(drop=True)
+
+    # 4. Cálculos para os gráficos
+    df['mes_ano'] = df['data_competencia'].dt.strftime('%b/%Y')
+    df['ano'] = df['data_competencia'].dt.strftime('%Y')
+    df['mes'] = df['data_competencia'].dt.strftime('%B')
+    
+    # Formatações para exibição
+    df['faturamento_formatado'] = df['faturamento'].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+    df['impostos_formatado'] = df['total_impostos'].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+
+    # Cálculo da Carga Tributária
+    df['carga_tributaria'] = (df['total_impostos'] / df['faturamento']) * 100
+    df['carga_formatado'] = df['carga_tributaria'].apply(lambda x: f"{x:.2f}%")
+
+    # Cálculo da Taxa de Crescimento
+    df['taxa_crescimento'] = df['faturamento'].pct_change() * 100
+    df['crescimento_formatado'] = df['taxa_crescimento'].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "0.00%")
+
+    # Cálculo dos valores acumulados
+    df['faturamento_acumulado'] = df['faturamento'].cumsum()
+    df['impostos_acumulados'] = df['total_impostos'].cumsum()
+    df['faturamento_acumulado_formatado'] = df['faturamento_acumulado'].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+    df['impostos_acumulados_formatado'] = df['impostos_acumulados'].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+
+    return df
+
+def preparar_dados_para_kpis_visuais(db: Session, cnpj: str, data_inicio: date, data_fim: date) -> Optional[Dict[str, Any]]:
+    """
+    Busca o PGDAS mais recente no período e prepara os dados para os gráficos
+    de medidor (gauge) e rosca (pie).
+    """
+    registos = crud_dados_fiscais.obter_dados_por_periodo(
+        db,
+        cnpj=cnpj,
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+        tipos_documento=["PGDAS"]
+    )
+
+    if not registos:
+        return None
+
+    # Pega o último registro do período para os KPIs
+    ultimo_reg = max(registos, key=lambda r: r.data_competencia)
+    impostos = ultimo_reg.impostos or {}
+
+    # Dados para o gráfico de Medidor (Limite de Faturamento)
+    dados_medidor = {
+        "rba": _converter_valor(impostos.get("receita_bruta_acumulada_rba")),
+        "limite": _converter_valor(impostos.get("limite_faturamento")),
+        "sublimite": _converter_valor(impostos.get("sublimite_receita"))
+    }
+
+    # Dados para o gráfico de Rosca (Segregação de Tributos)
+    tributos_rosca = {
+        "IRPJ": _converter_valor(impostos.get("irpj")),
+        "CSLL": _converter_valor(impostos.get("csll")),
+        "COFINS": _converter_valor(impostos.get("cofins")),
+        "PIS_PASEP": _converter_valor(impostos.get("pis_pasep")),
+        "INSS_CPP": _converter_valor(impostos.get("inss_cpp")),
+        "IPI": _converter_valor(impostos.get("ipi")),
+        "ICMS": _converter_valor(impostos.get("icms")),
+        "ISS": _converter_valor(impostos.get("iss")),
+    }
+    
+    # Filtra apenas os tributos que têm valor
+    dados_rosca = {k: v for k, v in tributos_rosca.items() if v is not None and v > 0}
+
+    return {
+        "medidor": dados_medidor,
+        "rosca": dados_rosca
+    }

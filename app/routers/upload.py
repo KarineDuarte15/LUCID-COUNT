@@ -16,6 +16,7 @@ from app.schemas.tipos import TipoDocumento, TipoDocumento
 from app.core.database import SessionLocal
 from app.crud import documento as crud_documento
 from app.schemas import documento as schemas_documento
+from app.schemas import empresa as schemas_empresa
 # --- NOVAS IMPORTAÇÕES NECESSÁRIAS ---
 from app.crud import dados_fiscais as crud_dados_fiscais
 from app.services import processamento as services_processamento
@@ -64,7 +65,11 @@ async def upload_e_registar_multiplos_ficheiros(
     Endpoint para receber, validar, salvar, registar E PROCESSAR múltiplos ficheiros.
     """
     UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    empresa = crud_empresa.get_empresa_por_cnpj(db, cnpj=cnpj)
+    # CÓDIGO CORRIGIDO
+    # Cria uma instância do schema Pydantic com os dados recebidos
+    empresa_para_criar = schemas_empresa.EmpresaCreate(cnpj=cnpj, regime_tributario=regime.value)
+    # Passa o objeto schema para a função do CRUD
+    empresa = crud_empresa.criar_empresa(db=db, empresa=empresa_para_criar)
     if not empresa:
         print(f"Empresa com CNPJ {cnpj} não encontrada. Criando novo registo...")
         empresa = crud_empresa.criar_empresa(db=db, cnpj=cnpj, regime=regime)

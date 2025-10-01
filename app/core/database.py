@@ -30,3 +30,12 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Cria uma classe Base. Usaremos esta classe para criar cada um dos modelos
 # do banco de dados (os modelos ORM).
 Base = declarative_base()
+
+# --- FUNÇÃO DE DEPENDÊNCIA ---
+# Cria e fornece uma sessão de banco de dados por requisição e garante que ela seja fechada.
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
